@@ -234,6 +234,15 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
   const albumArtInputRef = useRef<HTMLInputElement>(null);
   const customAlbumArtImageRef = useRef<HTMLImageElement | null>(null);
 
+  // Custom Audio
+  const [customAudioUrl, setCustomAudioUrl] = useState<string | null>(null);
+  const [customAudioFile, setCustomAudioFile] = useState<File | null>(null);
+  const audioFileInputRef = useRef<HTMLInputElement>(null);
+  const customAudioUrlRef = useRef<string | null>(null);
+  const customAudioFileRef = useRef<File | null>(null);
+  useEffect(() => { customAudioUrlRef.current = customAudioUrl; }, [customAudioUrl]);
+  useEffect(() => { customAudioFileRef.current = customAudioFile; }, [customAudioFile]);
+
   // Pexels Browser State
   const [showPexelsBrowser, setShowPexelsBrowser] = useState(false);
   const [pexelsTarget, setPexelsTarget] = useState<'background' | 'albumArt'>('background');
@@ -460,7 +469,7 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
     // Audio Setup
     const audio = new Audio();
     audio.crossOrigin = "anonymous";
-    audio.src = song.audioUrl || '';
+    audio.src = customAudioUrl || song.audioUrl || '';
     audioRef.current = audio;
 
     const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -668,9 +677,15 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
 
     // Fetch and decode audio
     setExportProgress(2);
-    const audioUrl = song.audioUrl || '';
-    const audioResponse = await fetch(audioUrl);
-    const audioArrayBuffer = await audioResponse.arrayBuffer();
+    let audioArrayBuffer: ArrayBuffer;
+    if (customAudioFileRef.current) {
+      // Read from uploaded file directly
+      audioArrayBuffer = await customAudioFileRef.current.arrayBuffer();
+    } else {
+      const audioUrl = customAudioUrlRef.current || song.audioUrl || '';
+      const audioResponse = await fetch(audioUrl);
+      audioArrayBuffer = await audioResponse.arrayBuffer();
+    }
 
     // Keep a copy for FFmpeg
     const audioDataCopy = audioArrayBuffer.slice(0);
@@ -689,6 +704,43 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
     const frequencyDataFrames = await analyzeAudioOffline(audioBuffer, fps);
 
     setExportProgress(15);
+
+    // Pre-render background video frames for faster access (eliminates per-frame seeking)
+    let bgVideoFrames: ImageBitmap[] = [];
+    if (bgVideo && bgVideo.duration > 0) {
+      setExportStage('capturing'); // Reuse capturing stage for video extraction
+      const videoDuration = bgVideo.duration;
+      const videoFrameCount = Math.ceil(Math.min(duration, videoDuration) * fps);
+
+      for (let i = 0; i < videoFrameCount; i++) {
+        const videoTime = (i / fps) % videoDuration;
+        bgVideo.currentTime = videoTime;
+
+        // Wait for seek to complete
+        await new Promise<void>((resolve) => {
+          const onSeeked = () => {
+            bgVideo!.removeEventListener('seeked', onSeeked);
+            resolve();
+          };
+          bgVideo!.addEventListener('seeked', onSeeked);
+          setTimeout(resolve, 50); // Slightly longer timeout for reliability during extraction
+        });
+
+        // Create ImageBitmap from current video frame
+        try {
+          const bitmap = await createImageBitmap(bgVideo);
+          bgVideoFrames.push(bitmap);
+        } catch {
+          // If createImageBitmap fails, skip this frame
+        }
+
+        // Update progress during video extraction (15-25%)
+        const extractProgress = 15 + (i / videoFrameCount) * 10;
+        setExportProgress(Math.round(extractProgress));
+      }
+    }
+
+    setExportProgress(25);
 
     // Render all frames
     const currentConfig = configRef.current;
@@ -721,24 +773,13 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, width, height);
 
-      // Draw background (video or image)
-      let bgSource: HTMLImageElement | HTMLVideoElement | null = bgImage;
+      // Draw background (video frames are pre-rendered, image is direct)
+      let bgSource: HTMLImageElement | HTMLVideoElement | ImageBitmap | null = bgImage;
 
-      if (bgVideo) {
-        // Seek video to current frame time (loop if video is shorter)
-        const videoTime = time % (bgVideo.duration || 1);
-        bgVideo.currentTime = videoTime;
-        // Wait for seek to complete (shorter timeout for better performance)
-        await new Promise<void>((resolve) => {
-          const onSeeked = () => {
-            bgVideo!.removeEventListener('seeked', onSeeked);
-            resolve();
-          };
-          bgVideo!.addEventListener('seeked', onSeeked);
-          // Shorter fallback timeout - video seek is often instant for loaded videos
-          setTimeout(resolve, 10);
-        });
-        bgSource = bgVideo;
+      if (bgVideoFrames.length > 0) {
+        // Use pre-rendered video frame (instant access, no seeking)
+        const videoFrameIndex = frameIndex % bgVideoFrames.length;
+        bgSource = bgVideoFrames[videoFrameIndex];
       }
 
       if (bgSource) {
@@ -758,8 +799,18 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
 
         if (backgroundFitRef.current === 'cover') {
             // Calculate scale to cover canvas while maintaining aspect ratio
-            const imgWidth = bgSource instanceof HTMLVideoElement ? bgSource.videoWidth : bgSource.naturalWidth;
-            const imgHeight = bgSource instanceof HTMLVideoElement ? bgSource.videoHeight : bgSource.naturalHeight;
+            // Handle different source types: HTMLVideoElement, HTMLImageElement, ImageBitmap
+            let imgWidth: number, imgHeight: number;
+            if (bgSource instanceof HTMLVideoElement) {
+                imgWidth = bgSource.videoWidth;
+                imgHeight = bgSource.videoHeight;
+            } else if (bgSource instanceof ImageBitmap) {
+                imgWidth = bgSource.width;
+                imgHeight = bgSource.height;
+            } else {
+                imgWidth = (bgSource as HTMLImageElement).naturalWidth;
+                imgHeight = (bgSource as HTMLImageElement).naturalHeight;
+            }
 
             if (imgWidth > 0 && imgHeight > 0) {
                 const canvasRatio = width / height;
@@ -889,118 +940,124 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
 
       ctx.restore();
 
-      // Apply post-processing effects
-      const scanlineGap = Math.max(2, Math.round(4 * scale));
-      const scanlineHeight = Math.max(1, Math.round(2 * scale));
-      if (currentEffects.scanlines || currentEffects.cctv) {
-        ctx.fillStyle = `rgba(0,0,0,${currentIntensities.scanlines * 0.8})`;
-        for (let i = 0; i < height; i += scanlineGap) {
-          ctx.fillRect(0, i, width, scanlineHeight);
+      // Apply post-processing effects (skip entirely if no effects enabled)
+      const hasAnyEffect = Object.values(currentEffects).some(v => v);
+      if (hasAnyEffect) {
+        const scanlineGap = Math.max(2, Math.round(4 * scale));
+        const scanlineHeight = Math.max(1, Math.round(2 * scale));
+        if (currentEffects.scanlines || currentEffects.cctv) {
+          ctx.fillStyle = `rgba(0,0,0,${currentIntensities.scanlines * 0.8})`;
+          for (let i = 0; i < height; i += scanlineGap) {
+            ctx.fillRect(0, i, width, scanlineHeight);
+          }
+        }
+
+        if (currentEffects.vhs || currentEffects.chromatic || (currentEffects.glitch && Math.random() > (1 - currentIntensities.glitch))) {
+          const intensity = currentEffects.vhs ? currentIntensities.vhs : currentIntensities.chromatic;
+          const offset = (10 * scale * intensity) * normBass;
+          ctx.globalCompositeOperation = 'screen';
+          ctx.fillStyle = `rgba(255,0,0,${0.2 * intensity})`;
+          ctx.fillRect(-offset, 0, width, height);
+          ctx.fillStyle = `rgba(0,0,255,${0.2 * intensity})`;
+          ctx.fillRect(offset, 0, width, height);
+          ctx.globalCompositeOperation = 'source-over';
+        }
+
+        if (currentEffects.glitch && Math.random() > (1 - currentIntensities.glitch)) {
+          ctx.fillStyle = Math.random() > 0.5 ? currentConfig.primaryColor : '#fff';
+          ctx.fillRect(Math.random() * width, Math.random() * height, Math.random() * 200 * scale, 4 * scale);
+        }
+
+        if (currentEffects.cctv) {
+          const intensity = currentIntensities.cctv;
+          ctx.globalCompositeOperation = 'overlay';
+          ctx.fillStyle = `rgba(0, 50, 0, ${0.4 * intensity})`;
+          ctx.fillRect(0, 0, width, height);
+
+          const grad = ctx.createRadialGradient(centerX, centerY, height * 0.4, centerX, centerY, height * 0.9);
+          grad.addColorStop(0, 'transparent');
+          grad.addColorStop(1, 'black');
+          ctx.globalCompositeOperation = 'multiply';
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, width, height);
+          ctx.globalCompositeOperation = 'source-over';
+        }
+
+        // Bloom / Glow effect
+        if (currentEffects.bloom) {
+          const intensity = currentIntensities.bloom;
+          ctx.globalCompositeOperation = 'screen';
+          ctx.filter = `blur(${15 * scale * intensity}px)`;
+          ctx.globalAlpha = 0.4 * intensity;
+          ctx.drawImage(canvas, 0, 0);
+          ctx.filter = 'none';
+          ctx.globalAlpha = 1;
+          ctx.globalCompositeOperation = 'source-over';
+        }
+
+        // Film Grain
+        if (currentEffects.filmGrain) {
+          const intensity = currentIntensities.filmGrain;
+          const imageData = ctx.getImageData(0, 0, width, height);
+          const data = imageData.data;
+          const grainAmount = intensity * 50;
+          for (let i = 0; i < data.length; i += 16) {
+            const noise = (Math.random() - 0.5) * grainAmount;
+            data[i] += noise;
+            data[i + 1] += noise;
+            data[i + 2] += noise;
+          }
+          ctx.putImageData(imageData, 0, 0);
+        }
+
+        // Strobe effect
+        if (currentEffects.strobe && normBass > (0.7 - currentIntensities.strobe * 0.3)) {
+          ctx.globalCompositeOperation = 'screen';
+          ctx.fillStyle = `rgba(255, 255, 255, ${currentIntensities.strobe * normBass * 0.8})`;
+          ctx.fillRect(0, 0, width, height);
+          ctx.globalCompositeOperation = 'source-over';
+        }
+
+        // Vignette effect
+        if (currentEffects.vignette) {
+          const intensity = currentIntensities.vignette;
+          const grad = ctx.createRadialGradient(centerX, centerY, height * 0.3, centerX, centerY, height * 0.8);
+          grad.addColorStop(0, 'transparent');
+          grad.addColorStop(1, `rgba(0, 0, 0, ${0.8 * intensity})`);
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, width, height);
+        }
+
+        // Hue Shift effect
+        if (currentEffects.hueShift) {
+          const hueRotation = currentIntensities.hueShift * 360 * (1 + normBass * 0.5);
+          ctx.filter = `hue-rotate(${hueRotation}deg)`;
+          ctx.drawImage(canvas, 0, 0);
+          ctx.filter = 'none';
+        }
+
+        // Letterbox effect
+        if (currentEffects.letterbox) {
+          const barHeight = height * 0.12 * currentIntensities.letterbox;
+          ctx.fillStyle = 'black';
+          ctx.fillRect(0, 0, width, barHeight);
+          ctx.fillRect(0, height - barHeight, width, barHeight);
         }
       }
 
-      if (currentEffects.vhs || currentEffects.chromatic || (currentEffects.glitch && Math.random() > (1 - currentIntensities.glitch))) {
-        const intensity = currentEffects.vhs ? currentIntensities.vhs : currentIntensities.chromatic;
-        const offset = (10 * scale * intensity) * normBass;
-        ctx.globalCompositeOperation = 'screen';
-        ctx.fillStyle = `rgba(255,0,0,${0.2 * intensity})`;
-        ctx.fillRect(-offset, 0, width, height);
-        ctx.fillStyle = `rgba(0,0,255,${0.2 * intensity})`;
-        ctx.fillRect(offset, 0, width, height);
-        ctx.globalCompositeOperation = 'source-over';
-      }
+      // Capture frame - use lower JPEG quality (frames get re-encoded by H.264 anyway)
+      const jpegQuality = width <= 480 ? 0.5 : width <= 720 ? 0.6 : 0.7;
 
-      if (currentEffects.glitch && Math.random() > (1 - currentIntensities.glitch)) {
-        ctx.fillStyle = Math.random() > 0.5 ? currentConfig.primaryColor : '#fff';
-        ctx.fillRect(Math.random() * width, Math.random() * height, Math.random() * 200 * scale, 4 * scale);
-      }
-
-      if (currentEffects.cctv) {
-        const intensity = currentIntensities.cctv;
-        ctx.globalCompositeOperation = 'overlay';
-        ctx.fillStyle = `rgba(0, 50, 0, ${0.4 * intensity})`;
-        ctx.fillRect(0, 0, width, height);
-
-        const grad = ctx.createRadialGradient(centerX, centerY, height * 0.4, centerX, centerY, height * 0.9);
-        grad.addColorStop(0, 'transparent');
-        grad.addColorStop(1, 'black');
-        ctx.globalCompositeOperation = 'multiply';
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, width, height);
-        ctx.globalCompositeOperation = 'source-over';
-      }
-
-      // Bloom / Glow effect
-      if (currentEffects.bloom) {
-        const intensity = currentIntensities.bloom;
-        ctx.globalCompositeOperation = 'screen';
-        ctx.filter = `blur(${15 * scale * intensity}px)`;
-        ctx.globalAlpha = 0.4 * intensity;
-        ctx.drawImage(canvas, 0, 0);
-        ctx.filter = 'none';
-        ctx.globalAlpha = 1;
-        ctx.globalCompositeOperation = 'source-over';
-      }
-
-      // Film Grain
-      if (currentEffects.filmGrain) {
-        const intensity = currentIntensities.filmGrain;
-        const imageData = ctx.getImageData(0, 0, width, height);
-        const data = imageData.data;
-        const grainAmount = intensity * 50;
-        for (let i = 0; i < data.length; i += 16) {
-          const noise = (Math.random() - 0.5) * grainAmount;
-          data[i] += noise;
-          data[i + 1] += noise;
-          data[i + 2] += noise;
-        }
-        ctx.putImageData(imageData, 0, 0);
-      }
-
-      // Strobe effect
-      if (currentEffects.strobe && normBass > (0.7 - currentIntensities.strobe * 0.3)) {
-        ctx.globalCompositeOperation = 'screen';
-        ctx.fillStyle = `rgba(255, 255, 255, ${currentIntensities.strobe * normBass * 0.8})`;
-        ctx.fillRect(0, 0, width, height);
-        ctx.globalCompositeOperation = 'source-over';
-      }
-
-      // Vignette effect
-      if (currentEffects.vignette) {
-        const intensity = currentIntensities.vignette;
-        const grad = ctx.createRadialGradient(centerX, centerY, height * 0.3, centerX, centerY, height * 0.8);
-        grad.addColorStop(0, 'transparent');
-        grad.addColorStop(1, `rgba(0, 0, 0, ${0.8 * intensity})`);
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, width, height);
-      }
-
-      // Hue Shift effect
-      if (currentEffects.hueShift) {
-        const hueRotation = currentIntensities.hueShift * 360 * (1 + normBass * 0.5);
-        ctx.filter = `hue-rotate(${hueRotation}deg)`;
-        ctx.drawImage(canvas, 0, 0);
-        ctx.filter = 'none';
-      }
-
-      // Letterbox effect
-      if (currentEffects.letterbox) {
-        const barHeight = height * 0.12 * currentIntensities.letterbox;
-        ctx.fillStyle = 'black';
-        ctx.fillRect(0, 0, width, barHeight);
-        ctx.fillRect(0, height - barHeight, width, barHeight);
-      }
-
-      // Capture frame - use lower JPEG quality for lower resolutions (faster encoding)
-      const jpegQuality = width <= 480 ? 0.7 : width <= 720 ? 0.8 : 0.85;
-      const frameData = canvas.toDataURL('image/jpeg', jpegQuality);
-      const base64Data = frameData.split(',')[1];
-      const binaryData = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+      // Use toBlob for faster binary conversion (avoids base64 encode/decode)
+      const blob = await new Promise<Blob>((resolve) =>
+        canvas.toBlob((b) => resolve(b!), 'image/jpeg', jpegQuality)
+      );
+      const binaryData = new Uint8Array(await blob.arrayBuffer());
       await ffmpeg.writeFile(`frame${String(frameIndex).padStart(6, '0')}.jpg`, binaryData);
 
-      // Update progress (15-70% for frame rendering)
+      // Update progress (25-70% for frame rendering, 15-25% was video extraction)
       if (frameIndex % 10 === 0) {
-        setExportProgress(15 + Math.round((frameIndex / totalFrames) * 55));
+        setExportProgress(25 + Math.round((frameIndex / totalFrames) * 45));
       }
     }
 
@@ -1075,6 +1132,12 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
     await ffmpeg.deleteFile('output.mp4').catch(() => {});
     await audioCtx.close();
 
+    // Clean up pre-rendered video frames to free memory
+    for (const bitmap of bgVideoFrames) {
+      bitmap.close();
+    }
+    bgVideoFrames = [];
+
     setExportProgress(100);
 
     // Small delay before hiding the progress to show completion
@@ -1108,6 +1171,41 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       const url = URL.createObjectURL(file);
       setVideoUrl(url);
       setBackgroundType('video');
+    }
+  };
+
+  const handleAudioFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const url = URL.createObjectURL(file);
+      setCustomAudioUrl(url);
+      setCustomAudioFile(file);
+      // Reinitialize audio with new source
+      if (audioRef.current) {
+        const wasPlaying = !audioRef.current.paused;
+        audioRef.current.src = url;
+        audioRef.current.load();
+        if (wasPlaying) {
+          audioRef.current.play().catch(() => {});
+        }
+      }
+    }
+  };
+
+  const clearCustomAudio = () => {
+    if (customAudioUrl && customAudioUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(customAudioUrl);
+    }
+    setCustomAudioUrl(null);
+    setCustomAudioFile(null);
+    // Revert to original song audio
+    if (audioRef.current) {
+      const wasPlaying = !audioRef.current.paused;
+      audioRef.current.src = song.audioUrl || '';
+      audioRef.current.load();
+      if (wasPlaying) {
+        audioRef.current.play().catch(() => {});
+      }
     }
   };
 
@@ -2574,6 +2672,56 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
                             </div>
                         </div>
 
+                        {/* Audio Source Section */}
+                        <div className="space-y-3">
+                            <label className="text-xs font-bold text-zinc-500 uppercase">Audio Source</label>
+                            <div className="space-y-2">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="radio"
+                                        name="audioSource"
+                                        checked={!customAudioUrl}
+                                        onChange={() => clearCustomAudio()}
+                                        className="accent-pink-500"
+                                    />
+                                    <span className="text-sm text-zinc-300">Original Song Audio</span>
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="radio"
+                                        name="audioSource"
+                                        checked={!!customAudioUrl}
+                                        onChange={() => audioFileInputRef.current?.click()}
+                                        className="accent-pink-500"
+                                    />
+                                    <span className="text-sm text-zinc-300">Custom Audio</span>
+                                </label>
+                                {customAudioUrl && (
+                                    <div className="ml-6 space-y-2">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs text-emerald-400 truncate flex-1">
+                                                ✓ {customAudioFile?.name || 'Custom audio loaded'}
+                                            </span>
+                                            <button
+                                                onClick={clearCustomAudio}
+                                                className="text-xs text-zinc-400 hover:text-red-400"
+                                            >
+                                                Clear
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                                {!customAudioUrl && (
+                                    <button
+                                        onClick={() => audioFileInputRef.current?.click()}
+                                        className="ml-6 py-1.5 px-3 bg-zinc-700 hover:bg-zinc-600 rounded text-xs text-white flex items-center gap-1"
+                                    >
+                                        <Upload size={12}/> Upload Audio
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
                         {/* Audio Bitrate Section */}
                         <div className="space-y-3">
                             <label className="text-xs font-bold text-zinc-500 uppercase">Audio Bitrate</label>
@@ -2638,6 +2786,15 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
                 )}
 
             </div>
+
+            {/* Hidden Audio Input (outside tabs so it's always available) */}
+            <input
+                type="file"
+                ref={audioFileInputRef}
+                onChange={handleAudioFileUpload}
+                className="hidden"
+                accept="audio/*"
+            />
 
             {/* Footer */}
             <div className="p-4 md:p-6 border-t border-white/5 bg-black/20 space-y-3 safe-area-inset-bottom">
