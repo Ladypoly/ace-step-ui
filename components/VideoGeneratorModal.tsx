@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Song } from '../types';
-import { X, Play, Pause, Download, Wand2, Image as ImageIcon, Music, Video, Loader2, Palette, Layers, Zap, Type, Monitor, Aperture, Activity, Circle, Grid, Box, BarChart2, Waves, Disc, Upload, Plus, Trash2, Settings2, MousePointer2, Search, ExternalLink, Sun, Film, Minus } from 'lucide-react';
+import { X, Play, Pause, Download, Wand2, Image as ImageIcon, Music, Video, Loader2, Palette, Layers, Zap, Type, Monitor, Aperture, Activity, Circle, Grid, Box, BarChart2, Waves, Disc, Upload, Plus, Trash2, Settings2, MousePointer2, Search, ExternalLink, Sun, Film, Minus, Target, Sparkles, Mountain as MountainIcon, Gauge, Snowflake, RotateCw } from 'lucide-react';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import { useResponsive } from '../context/ResponsiveContext';
@@ -11,10 +11,12 @@ interface VideoGeneratorModalProps {
   song: Song | null;
 }
 
-type PresetType = 
-  | 'NCS Circle' | 'Linear Bars' | 'Dual Mirror' | 'Center Wave' 
-  | 'Orbital' | 'Digital Rain' | 'Hexagon' | 'Shockwave' 
-  | 'Oscilloscope' | 'Minimal';
+type PresetType =
+  | 'NCS Circle' | 'Linear Bars' | 'Dual Mirror' | 'Center Wave'
+  | 'Orbital' | 'Digital Rain' | 'Hexagon' | 'Shockwave'
+  | 'Oscilloscope' | 'Minimal'
+  | 'Radial Spectrum' | 'Symmetric Bars' | 'Mountain' | 'Particles Burst'
+  | 'Kaleidoscope' | 'Spiral' | 'VU Meter' | 'Blob';
 
 interface VisualizerConfig {
   preset: PresetType;
@@ -22,6 +24,7 @@ interface VisualizerConfig {
   secondaryColor: string;
   bgDim: number;
   particleCount: number;
+  intensity: number; // 0.5 to 2.0, default 1.0
 }
 
 interface EffectConfig {
@@ -90,6 +93,14 @@ const PRESETS: { id: PresetType; label: string; icon: React.ReactNode }[] = [
   { id: 'Digital Rain', label: 'Matrix', icon: <Grid size={16} /> },
   { id: 'Shockwave', label: 'Pulse', icon: <Aperture size={16} /> },
   { id: 'Minimal', label: 'Clean', icon: <Type size={16} /> },
+  { id: 'Radial Spectrum', label: 'Radial', icon: <Target size={16} /> },
+  { id: 'Symmetric Bars', label: 'Butterfly', icon: <Snowflake size={16} /> },
+  { id: 'Mountain', label: 'Terrain', icon: <MountainIcon size={16} /> },
+  { id: 'Particles Burst', label: 'Burst', icon: <Sparkles size={16} /> },
+  { id: 'Kaleidoscope', label: 'Kaleidoscope', icon: <Snowflake size={16} /> },
+  { id: 'Spiral', label: 'Spiral', icon: <RotateCw size={16} /> },
+  { id: 'VU Meter', label: 'VU Meter', icon: <Gauge size={16} /> },
+  { id: 'Blob', label: 'Blob', icon: <Circle size={16} /> },
 ];
 
 // Output configuration types
@@ -267,7 +278,8 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
     primaryColor: '#ec4899', // Pink-500
     secondaryColor: '#3b82f6', // Blue-500
     bgDim: 0.6,
-    particleCount: 50
+    particleCount: 50,
+    intensity: 1.0
   });
 
   const [effects, setEffects] = useState<EffectConfig>({
@@ -761,12 +773,14 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
         timeDomain[i] = 128 + Math.sin(i * 0.1 + time * 10) * 64 * bassLevel;
       }
 
-      // Calculate bass and pulse
+      // Calculate bass and pulse with intensity modifier
+      const intensity = currentConfig.intensity;
       let bass = 0;
       for (let i = 0; i < 20; i++) bass += dataArray[i];
       bass = bass / 20;
-      const normBass = bass / 255;
-      const pulse = 1 + normBass * 0.15;
+      // Apply intensity to the normalized bass value (clamped to 0-1)
+      const normBass = Math.min(1, (bass / 255) * intensity);
+      const pulse = 1 + normBass * 0.15 * intensity;
 
       // Clear canvas
       ctx.globalCompositeOperation = 'source-over';
@@ -857,31 +871,55 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
 
       switch(currentConfig.preset) {
         case 'NCS Circle':
-          drawNCSCircle(ctx, centerX, centerY, dataArray, pulse, time, currentConfig.primaryColor, currentConfig.secondaryColor, scale);
+          drawNCSCircle(ctx, centerX, centerY, dataArray, pulse, time, currentConfig.primaryColor, currentConfig.secondaryColor, scale, intensity);
           break;
         case 'Linear Bars':
-          drawLinearBars(ctx, width, height, dataArray, currentConfig.primaryColor, currentConfig.secondaryColor, scale);
+          drawLinearBars(ctx, width, height, dataArray, currentConfig.primaryColor, currentConfig.secondaryColor, scale, intensity);
           break;
         case 'Dual Mirror':
-          drawDualMirror(ctx, width, height, dataArray, currentConfig.primaryColor, scale);
+          drawDualMirror(ctx, width, height, dataArray, currentConfig.primaryColor, scale, intensity);
           break;
         case 'Center Wave':
-          drawCenterWave(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor, scale);
+          drawCenterWave(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor, scale, intensity);
           break;
         case 'Orbital':
-          drawOrbital(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor, currentConfig.secondaryColor, scale);
+          drawOrbital(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor, currentConfig.secondaryColor, scale, intensity);
           break;
         case 'Hexagon':
-          drawHexagon(ctx, centerX, centerY, dataArray, pulse, time, currentConfig.primaryColor, scale);
+          drawHexagon(ctx, centerX, centerY, dataArray, pulse, time, currentConfig.primaryColor, scale, intensity);
           break;
         case 'Oscilloscope':
-          drawOscilloscope(ctx, width, height, timeDomain, currentConfig.primaryColor, scale);
+          drawOscilloscope(ctx, width, height, timeDomain, currentConfig.primaryColor, scale, intensity);
           break;
         case 'Digital Rain':
-          drawDigitalRain(ctx, width, height, dataArray, time, currentConfig.primaryColor, scale);
+          drawDigitalRain(ctx, width, height, dataArray, time, currentConfig.primaryColor, scale, intensity);
           break;
         case 'Shockwave':
-          drawShockwave(ctx, centerX, centerY, bass, time, currentConfig.primaryColor, scale);
+          drawShockwave(ctx, centerX, centerY, bass, time, currentConfig.primaryColor, scale, intensity);
+          break;
+        case 'Radial Spectrum':
+          drawRadialSpectrum(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor, currentConfig.secondaryColor, scale, intensity);
+          break;
+        case 'Symmetric Bars':
+          drawSymmetricBars(ctx, width, height, dataArray, currentConfig.primaryColor, currentConfig.secondaryColor, scale, intensity);
+          break;
+        case 'Mountain':
+          drawMountain(ctx, width, height, dataArray, time, currentConfig.primaryColor, currentConfig.secondaryColor, scale, intensity);
+          break;
+        case 'Particles Burst':
+          drawParticlesBurst(ctx, centerX, centerY, dataArray, bass, time, currentConfig.primaryColor, scale, intensity);
+          break;
+        case 'Kaleidoscope':
+          drawKaleidoscope(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor, currentConfig.secondaryColor, scale, intensity);
+          break;
+        case 'Spiral':
+          drawSpiral(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor, currentConfig.secondaryColor, scale, intensity);
+          break;
+        case 'VU Meter':
+          drawVUMeter(ctx, width, height, dataArray, bass, time, currentConfig.primaryColor, scale, intensity);
+          break;
+        case 'Blob':
+          drawBlob(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor, currentConfig.secondaryColor, scale, intensity);
           break;
       }
 
@@ -889,7 +927,7 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
 
       // Album art size scales with resolution
       const albumRadius = 150 * scale;
-      if (['NCS Circle', 'Hexagon', 'Orbital', 'Shockwave'].includes(currentConfig.preset) && albumImage) {
+      if (['NCS Circle', 'Hexagon', 'Orbital', 'Shockwave', 'Radial Spectrum', 'Particles Burst', 'Kaleidoscope', 'Blob'].includes(currentConfig.preset) && albumImage) {
         // Draw album art inline with pre-loaded image
         ctx.save();
         ctx.translate(centerX, centerY);
@@ -1336,12 +1374,14 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
     analyserRef.current.getByteTimeDomainData(timeDomain);
 
 
-    // Bass Calc
+    // Bass Calc with intensity modifier
+    const intensity = currentConfig.intensity;
     let bass = 0;
     for (let i = 0; i < 20; i++) bass += dataArray[i];
     bass = bass / 20;
-    const normBass = bass / 255;
-    const pulse = 1 + normBass * 0.15;
+    // Apply intensity to the normalized bass value (clamped to 0-1)
+    const normBass = Math.min(1, (bass / 255) * intensity);
+    const pulse = 1 + normBass * 0.15 * intensity;
 
     // --- 1. CLEAR & BACKGROUND ---
     ctx.globalCompositeOperation = 'source-over';
@@ -1421,37 +1461,61 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
 
     switch(currentConfig.preset) {
         case 'NCS Circle':
-            drawNCSCircle(ctx, centerX, centerY, dataArray, pulse, time, currentConfig.primaryColor, currentConfig.secondaryColor, scale);
+            drawNCSCircle(ctx, centerX, centerY, dataArray, pulse, time, currentConfig.primaryColor, currentConfig.secondaryColor, scale, intensity);
             break;
         case 'Linear Bars':
-            drawLinearBars(ctx, width, height, dataArray, currentConfig.primaryColor, currentConfig.secondaryColor, scale);
+            drawLinearBars(ctx, width, height, dataArray, currentConfig.primaryColor, currentConfig.secondaryColor, scale, intensity);
             break;
         case 'Dual Mirror':
-            drawDualMirror(ctx, width, height, dataArray, currentConfig.primaryColor, scale);
+            drawDualMirror(ctx, width, height, dataArray, currentConfig.primaryColor, scale, intensity);
             break;
         case 'Center Wave':
-            drawCenterWave(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor, scale);
+            drawCenterWave(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor, scale, intensity);
             break;
         case 'Orbital':
-            drawOrbital(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor, currentConfig.secondaryColor, scale);
+            drawOrbital(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor, currentConfig.secondaryColor, scale, intensity);
             break;
         case 'Hexagon':
-            drawHexagon(ctx, centerX, centerY, dataArray, pulse, time, currentConfig.primaryColor, scale);
+            drawHexagon(ctx, centerX, centerY, dataArray, pulse, time, currentConfig.primaryColor, scale, intensity);
             break;
         case 'Oscilloscope':
-            drawOscilloscope(ctx, width, height, timeDomain, currentConfig.primaryColor, scale);
+            drawOscilloscope(ctx, width, height, timeDomain, currentConfig.primaryColor, scale, intensity);
             break;
         case 'Digital Rain':
-            drawDigitalRain(ctx, width, height, dataArray, time, currentConfig.primaryColor, scale);
+            drawDigitalRain(ctx, width, height, dataArray, time, currentConfig.primaryColor, scale, intensity);
             break;
         case 'Shockwave':
-             drawShockwave(ctx, centerX, centerY, bass, time, currentConfig.primaryColor, scale);
+             drawShockwave(ctx, centerX, centerY, bass, time, currentConfig.primaryColor, scale, intensity);
              break;
+        case 'Radial Spectrum':
+            drawRadialSpectrum(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor, currentConfig.secondaryColor, scale, intensity);
+            break;
+        case 'Symmetric Bars':
+            drawSymmetricBars(ctx, width, height, dataArray, currentConfig.primaryColor, currentConfig.secondaryColor, scale, intensity);
+            break;
+        case 'Mountain':
+            drawMountain(ctx, width, height, dataArray, time, currentConfig.primaryColor, currentConfig.secondaryColor, scale, intensity);
+            break;
+        case 'Particles Burst':
+            drawParticlesBurst(ctx, centerX, centerY, dataArray, bass, time, currentConfig.primaryColor, scale, intensity);
+            break;
+        case 'Kaleidoscope':
+            drawKaleidoscope(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor, currentConfig.secondaryColor, scale, intensity);
+            break;
+        case 'Spiral':
+            drawSpiral(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor, currentConfig.secondaryColor, scale, intensity);
+            break;
+        case 'VU Meter':
+            drawVUMeter(ctx, width, height, dataArray, bass, time, currentConfig.primaryColor, scale, intensity);
+            break;
+        case 'Blob':
+            drawBlob(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor, currentConfig.secondaryColor, scale, intensity);
+            break;
     }
 
     drawParticles(ctx, width, height, time, bass, currentConfig.particleCount, currentConfig.primaryColor, scale);
 
-    if (['NCS Circle', 'Hexagon', 'Orbital', 'Shockwave'].includes(currentConfig.preset)) {
+    if (['NCS Circle', 'Hexagon', 'Orbital', 'Shockwave', 'Radial Spectrum', 'Particles Burst', 'Kaleidoscope', 'Blob'].includes(currentConfig.preset)) {
         const rawAlbumArtUrl = customAlbumArt || song.coverUrl;
         // Proxy external URLs to avoid CORS issues in fallback
         const albumArtUrl = rawAlbumArtUrl.startsWith('http')
@@ -1629,8 +1693,8 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
   };
 
   // --- DRAWING FUNCTIONS ---
-  // (Reusing existing drawing functions from previous step, ensuring they use updated args)
-  const drawNCSCircle = (ctx: CanvasRenderingContext2D, cx: number, cy: number, data: Uint8Array, pulse: number, time: number, c1: string, c2: string, scale: number) => {
+  // All drawing functions accept intensity parameter to scale visual effects
+  const drawNCSCircle = (ctx: CanvasRenderingContext2D, cx: number, cy: number, data: Uint8Array, pulse: number, time: number, c1: string, c2: string, scale: number, intensity: number) => {
     const radius = (150 + (pulse - 1) * 50) * scale;
     const bars = 80;
     const step = (Math.PI * 2) / bars;
@@ -1639,7 +1703,7 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
     ctx.rotate(time * 0.15);
     for (let i = 0; i < bars; i++) {
         const val = data[i + 10];
-        const normalized = val / 255;
+        const normalized = Math.min(1, (val / 255) * intensity);
         const h = (8 + Math.pow(normalized, 1.5) * 120) * scale;
         const barWidth = 6 * scale;
         const barRadius = 3 * scale;
@@ -1666,13 +1730,13 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
     ctx.restore();
   };
 
-  const drawLinearBars = (ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8Array, c1: string, c2: string, scale: number) => {
+  const drawLinearBars = (ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8Array, c1: string, c2: string, scale: number, intensity: number) => {
       const bars = 64;
       const barW = w / bars;
       const gap = 2 * scale;
       for(let i=0; i<bars; i++) {
           const val = data[i * 2];
-          const normalized = val / 255;
+          const normalized = Math.min(1, (val / 255) * intensity);
           const barH = (10 * scale) + Math.pow(normalized, 1.3) * (h * 0.35);
           const grad = ctx.createLinearGradient(0, h/2, 0, h/2 - barH);
           grad.addColorStop(0, c1);
@@ -1686,13 +1750,13 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       ctx.fillRect(0, h/2, w, 1 * scale);
   };
 
-  const drawDualMirror = (ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8Array, color: string, scale: number) => {
+  const drawDualMirror = (ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8Array, color: string, scale: number, intensity: number) => {
       const bars = 40;
       const barH = h / bars;
       const cy = h/2;
       for(let i=0; i<bars; i++) {
           const val = data[i*3];
-          const normalized = val / 255;
+          const normalized = Math.min(1, (val / 255) * intensity);
           const len = (20 * scale) + Math.pow(normalized, 1.4) * (w * 0.3);
           const alpha = 0.4 + normalized * 0.6;
           ctx.fillStyle = color;
@@ -1705,11 +1769,11 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       ctx.globalAlpha = 1;
   };
 
-  const drawOrbital = (ctx: CanvasRenderingContext2D, cx: number, cy: number, data: Uint8Array, time: number, c1: string, c2: string, scale: number) => {
+  const drawOrbital = (ctx: CanvasRenderingContext2D, cx: number, cy: number, data: Uint8Array, time: number, c1: string, c2: string, scale: number, intensity: number) => {
       for(let i=0; i<5; i++) {
           const r = (100 + (i * 55)) * scale;
           const val = data[i*10];
-          const normalized = val / 255;
+          const normalized = Math.min(1, (val / 255) * intensity);
           const width = (4 + normalized * 6) * scale;
           ctx.beginPath();
           ctx.strokeStyle = i % 2 === 0 ? c1 : c2;
@@ -1726,9 +1790,11 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       ctx.shadowBlur = 0;
   };
 
-  const drawHexagon = (ctx: CanvasRenderingContext2D, cx: number, cy: number, data: Uint8Array, pulse: number, time: number, color: string, scale: number) => {
+  const drawHexagon = (ctx: CanvasRenderingContext2D, cx: number, cy: number, data: Uint8Array, pulse: number, time: number, color: string, scale: number, intensity: number) => {
       const sides = 6;
-      const r = 180 * pulse * scale;
+      // Apply intensity to the pulse effect on the hexagon size
+      const intensePulse = 1 + (pulse - 1) * intensity;
+      const r = 180 * intensePulse * scale;
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(time * 0.4);
@@ -1736,7 +1802,7 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       ctx.lineWidth = 12 * scale;
       ctx.strokeStyle = color;
       ctx.lineJoin = 'round';
-      ctx.shadowBlur = 25 * scale;
+      ctx.shadowBlur = 25 * scale * intensity;
       ctx.shadowColor = color;
       for(let i=0; i<=sides; i++) {
           const angle = i * 2 * Math.PI / sides;
@@ -1750,17 +1816,17 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       ctx.shadowBlur = 0;
   };
 
-  const drawOscilloscope = (ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8Array, color: string, scale: number) => {
+  const drawOscilloscope = (ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8Array, color: string, scale: number, intensity: number) => {
       ctx.lineWidth = 3 * scale;
       ctx.strokeStyle = color;
-      ctx.shadowBlur = 15 * scale;
+      ctx.shadowBlur = 15 * scale * intensity;
       ctx.shadowColor = color;
       ctx.beginPath();
       const sliceWidth = w / data.length;
       let x = 0;
       for(let i = 0; i < data.length; i++) {
           const normalized = (data[i] - 128) / 128.0;
-          const dampened = normalized * 0.6;
+          const dampened = normalized * 0.6 * intensity;
           const yPos = (h/2) + (dampened * h/2);
           if(i === 0) ctx.moveTo(x, yPos);
           else ctx.lineTo(x, yPos);
@@ -1777,16 +1843,16 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       ctx.stroke();
   };
   
-  const drawCenterWave = (ctx: CanvasRenderingContext2D, cx: number, cy: number, data: Uint8Array, time: number, color: string, scale: number) => {
+  const drawCenterWave = (ctx: CanvasRenderingContext2D, cx: number, cy: number, data: Uint8Array, time: number, color: string, scale: number, intensity: number) => {
       ctx.strokeStyle = color;
       ctx.lineWidth = 2 * scale;
-      ctx.shadowBlur = 8 * scale;
+      ctx.shadowBlur = 8 * scale * intensity;
       ctx.shadowColor = color;
       for(let i=0; i<12; i++) {
           ctx.beginPath();
           const baseR = (60 + (i * 35)) * scale;
           const val = data[i*4];
-          const normalized = val / 255;
+          const normalized = Math.min(1, (val / 255) * intensity);
           const r = baseR + Math.pow(normalized, 1.5) * 25 * scale;
           ctx.globalAlpha = 0.8 - (i/15);
           ctx.ellipse(cx, cy, r, r * 0.75, time * 0.5 + i * 0.3, 0, Math.PI * 2);
@@ -1796,18 +1862,18 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       ctx.shadowBlur = 0;
   };
 
-  const drawDigitalRain = (ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8Array, time: number, color: string, scale: number) => {
+  const drawDigitalRain = (ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8Array, time: number, color: string, scale: number, intensity: number) => {
       const cols = 50;
       const colW = w / cols;
       ctx.fillStyle = color;
       const fontSize = Math.max(8, Math.round(14 * scale));
       ctx.font = `bold ${fontSize}px monospace`;
-      ctx.shadowBlur = 8 * scale;
+      ctx.shadowBlur = 8 * scale * intensity;
       ctx.shadowColor = color;
       const charSpacing = 18 * scale;
       for(let i=0; i<cols; i++) {
           const val = data[i*2];
-          const normalized = val / 255;
+          const normalized = Math.min(1, (val / 255) * intensity);
           const len = 8 + Math.floor(Math.pow(normalized, 1.3) * 15);
           const baseSpeed = 40 + (i % 5) * 10;
           const speedOffset = (time * baseSpeed * scale) % h;
@@ -1822,8 +1888,8 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       ctx.shadowBlur = 0;
   };
 
-  const drawShockwave = (ctx: CanvasRenderingContext2D, cx: number, cy: number, bass: number, time: number, color: string, scale: number) => {
-      const normBass = bass / 255;
+  const drawShockwave = (ctx: CanvasRenderingContext2D, cx: number, cy: number, bass: number, time: number, color: string, scale: number, intensity: number) => {
+      const normBass = Math.min(1, (bass / 255) * intensity);
       const maxRadius = 500 * scale;
       const rings = 6;
 
@@ -1841,7 +1907,7 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
               ctx.strokeStyle = color;
               ctx.lineWidth = lineWidth;
               ctx.globalAlpha = alpha;
-              ctx.shadowBlur = (20 + normBass * 30) * scale;
+              ctx.shadowBlur = (20 + normBass * 30) * scale * intensity;
               ctx.arc(cx, cy, radius, 0, Math.PI * 2);
               ctx.stroke();
           }
@@ -1860,6 +1926,436 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
 
       ctx.globalAlpha = 1;
       ctx.shadowBlur = 0;
+  };
+
+  // Radial Spectrum - Bars in a circle with filled wedges
+  const drawRadialSpectrum = (ctx: CanvasRenderingContext2D, cx: number, cy: number, data: Uint8Array, time: number, c1: string, c2: string, scale: number, intensity: number) => {
+    const bars = 64;
+    const innerRadius = 80 * scale;
+    const maxBarHeight = 180 * scale;
+    const step = (Math.PI * 2) / bars;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(time * 0.1);
+
+    for (let i = 0; i < bars; i++) {
+      const val = data[i * 2];
+      const normalized = Math.min(1, (val / 255) * intensity);
+      const barHeight = 10 * scale + Math.pow(normalized, 1.4) * maxBarHeight;
+      const angle = i * step;
+
+      const grad = ctx.createLinearGradient(0, innerRadius, 0, innerRadius + barHeight);
+      grad.addColorStop(0, c1);
+      grad.addColorStop(1, c2);
+      ctx.fillStyle = grad;
+      ctx.globalAlpha = 0.7 + normalized * 0.3;
+
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(angle) * innerRadius, Math.sin(angle) * innerRadius);
+      ctx.lineTo(Math.cos(angle) * (innerRadius + barHeight), Math.sin(angle) * (innerRadius + barHeight));
+      ctx.lineTo(Math.cos(angle + step * 0.8) * (innerRadius + barHeight), Math.sin(angle + step * 0.8) * (innerRadius + barHeight));
+      ctx.lineTo(Math.cos(angle + step * 0.8) * innerRadius, Math.sin(angle + step * 0.8) * innerRadius);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Inner circle
+    ctx.globalAlpha = 0.3;
+    ctx.beginPath();
+    ctx.arc(0, 0, innerRadius - 5 * scale, 0, Math.PI * 2);
+    ctx.strokeStyle = c1;
+    ctx.lineWidth = 2 * scale;
+    ctx.stroke();
+
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  };
+
+  // Symmetric Bars - Butterfly-like mirrored vertical bars
+  const drawSymmetricBars = (ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8Array, c1: string, c2: string, scale: number, intensity: number) => {
+    const bars = 32;
+    const barWidth = (w / 2) / bars;
+    const centerX = w / 2;
+    const centerY = h / 2;
+    const maxHeight = h * 0.4;
+    const gap = 2 * scale;
+
+    for (let i = 0; i < bars; i++) {
+      const val = data[i * 4];
+      const normalized = Math.min(1, (val / 255) * intensity);
+      const barH = 5 * scale + Math.pow(normalized, 1.5) * maxHeight;
+
+      const grad = ctx.createLinearGradient(0, centerY - barH, 0, centerY + barH);
+      grad.addColorStop(0, c2);
+      grad.addColorStop(0.5, c1);
+      grad.addColorStop(1, c2);
+      ctx.fillStyle = grad;
+      ctx.globalAlpha = 0.6 + normalized * 0.4;
+
+      // Right side bars (top and bottom mirrored)
+      const xRight = centerX + i * barWidth;
+      ctx.fillRect(xRight + gap / 2, centerY - barH, barWidth - gap, barH);
+      ctx.fillRect(xRight + gap / 2, centerY, barWidth - gap, barH);
+
+      // Left side bars (mirrored)
+      const xLeft = centerX - (i + 1) * barWidth;
+      ctx.fillRect(xLeft + gap / 2, centerY - barH, barWidth - gap, barH);
+      ctx.fillRect(xLeft + gap / 2, centerY, barWidth - gap, barH);
+    }
+
+    // Center line
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = c1;
+    ctx.fillRect(0, centerY - 1 * scale, w, 2 * scale);
+    ctx.globalAlpha = 1;
+  };
+
+  // Mountain Range - Filled area spectrum like a landscape
+  const drawMountain = (ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8Array, time: number, c1: string, c2: string, scale: number, intensity: number) => {
+    const points = 128;
+    const baseY = h * 0.75;
+
+    // Draw multiple layers for depth
+    for (let layer = 2; layer >= 0; layer--) {
+      const layerOffset = layer * 15;
+      const layerAlpha = 0.3 + (2 - layer) * 0.25;
+      const layerHeight = (0.2 + (2 - layer) * 0.1) * intensity;
+
+      ctx.beginPath();
+      ctx.moveTo(0, h);
+
+      for (let i = 0; i <= points; i++) {
+        const x = (i / points) * w;
+        const dataIndex = Math.floor((i + layerOffset) % 128);
+        const val = data[dataIndex];
+        const normalized = Math.min(1, (val / 255) * intensity);
+        const peakHeight = Math.pow(normalized, 1.3) * h * layerHeight;
+        const y = baseY - peakHeight - layer * 30 * scale;
+
+        if (i === 0) ctx.lineTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+
+      ctx.lineTo(w, h);
+      ctx.closePath();
+
+      const grad = ctx.createLinearGradient(0, baseY - h * 0.4, 0, h);
+      grad.addColorStop(0, layer === 0 ? c1 : c2);
+      grad.addColorStop(1, 'rgba(0,0,0,0.3)');
+
+      ctx.globalAlpha = layerAlpha;
+      ctx.fillStyle = grad;
+      ctx.fill();
+    }
+
+    // Horizon glow
+    ctx.globalAlpha = 0.4 * intensity;
+    const horizonGrad = ctx.createLinearGradient(0, baseY - 50 * scale, 0, baseY + 50 * scale);
+    horizonGrad.addColorStop(0, 'transparent');
+    horizonGrad.addColorStop(0.5, c1);
+    horizonGrad.addColorStop(1, 'transparent');
+    ctx.fillStyle = horizonGrad;
+    ctx.fillRect(0, baseY - 50 * scale, w, 100 * scale);
+
+    ctx.globalAlpha = 1;
+  };
+
+  // Particles Burst - Particles exploding from center on beats
+  const drawParticlesBurst = (ctx: CanvasRenderingContext2D, cx: number, cy: number, data: Uint8Array, bass: number, time: number, color: string, scale: number, intensity: number) => {
+    const normBass = Math.min(1, (bass / 255) * intensity);
+    const particleCount = 80;
+
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 15 * scale * intensity;
+
+    for (let i = 0; i < particleCount; i++) {
+      const seed = i * 173.7;
+      const angle = (seed % 360) * Math.PI / 180;
+      const speed = 50 + (i % 5) * 30;
+      const lifetime = (time * speed + seed) % 400;
+      const progress = lifetime / 400;
+
+      if (progress < 1) {
+        const distance = progress * 350 * scale * (0.5 + normBass * 0.5);
+        const x = cx + Math.cos(angle) * distance;
+        const y = cy + Math.sin(angle) * distance;
+        const size = (4 - progress * 3) * scale * (0.5 + normBass);
+        const alpha = (1 - progress) * 0.8;
+
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Central glow
+    const glowSize = (40 + normBass * 60) * scale;
+    const glowGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowSize);
+    glowGrad.addColorStop(0, color);
+    glowGrad.addColorStop(0.5, color);
+    glowGrad.addColorStop(1, 'transparent');
+    ctx.globalAlpha = 0.5 + normBass * 0.3;
+    ctx.fillStyle = glowGrad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, glowSize, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+  };
+
+  // Kaleidoscope - Symmetric mirrored patterns
+  const drawKaleidoscope = (ctx: CanvasRenderingContext2D, cx: number, cy: number, data: Uint8Array, time: number, c1: string, c2: string, scale: number, intensity: number) => {
+    const segments = 8;
+    const segmentAngle = (Math.PI * 2) / segments;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(time * 0.2);
+
+    for (let seg = 0; seg < segments; seg++) {
+      ctx.save();
+      ctx.rotate(seg * segmentAngle);
+
+      // Draw pattern in each segment
+      for (let i = 0; i < 12; i++) {
+        const val = data[i * 10];
+        const normalized = Math.min(1, (val / 255) * intensity);
+        const distance = 50 * scale + i * 25 * scale;
+        const size = (5 + normalized * 20) * scale;
+        const wobble = Math.sin(time * 3 + i * 0.5) * 10 * scale * intensity;
+
+        ctx.globalAlpha = 0.4 + normalized * 0.4;
+        ctx.fillStyle = i % 2 === 0 ? c1 : c2;
+        ctx.beginPath();
+        ctx.arc(distance + wobble, i * 5 * scale, size, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Mirror within segment
+        ctx.beginPath();
+        ctx.arc(distance + wobble, -i * 5 * scale, size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.restore();
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  };
+
+  // Spiral - Rotating pulsing spiral
+  const drawSpiral = (ctx: CanvasRenderingContext2D, cx: number, cy: number, data: Uint8Array, time: number, c1: string, c2: string, scale: number, intensity: number) => {
+    const arms = 3;
+    const pointsPerArm = 60;
+    const maxRadius = 280 * scale;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+
+    for (let arm = 0; arm < arms; arm++) {
+      const armOffset = (arm / arms) * Math.PI * 2;
+
+      ctx.beginPath();
+      ctx.strokeStyle = arm % 2 === 0 ? c1 : c2;
+      ctx.lineWidth = 4 * scale;
+      ctx.shadowColor = ctx.strokeStyle;
+      ctx.shadowBlur = 20 * scale * intensity;
+
+      for (let i = 0; i < pointsPerArm; i++) {
+        const progress = i / pointsPerArm;
+        const dataIndex = Math.floor(i * 2) % 128;
+        const val = data[dataIndex];
+        const normalized = Math.min(1, (val / 255) * intensity);
+
+        const angle = progress * Math.PI * 4 + time * 1.5 + armOffset;
+        const radius = progress * maxRadius * (0.8 + normalized * 0.3);
+        const x = Math.cos(angle) * radius;
+        const y = Math.sin(angle) * radius;
+
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+
+        ctx.globalAlpha = 0.3 + progress * 0.5 + normalized * 0.2;
+      }
+
+      ctx.stroke();
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  };
+
+  // VU Meter - Classic analog meter needles (arc curves down, needle points up)
+  const drawVUMeter = (ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8Array, bass: number, time: number, c1: string, scale: number, intensity: number) => {
+    const meterWidth = 200 * scale;
+    const meterRadius = meterWidth * 0.7;
+    const gap = 80 * scale; // Increased gap between meters
+    const leftCenterX = w / 2 - meterWidth / 2 - gap;
+    const rightCenterX = w / 2 + meterWidth / 2 + gap;
+    const centerY = h / 2 + 40 * scale; // Pivot point Y (moved down slightly)
+
+    // Get stereo-like values from different frequency bands with intensity
+    const leftVal = Math.min(1, (data[10] / 255) * intensity);
+    const rightVal = Math.min(1, (data[30] / 255) * intensity);
+
+    const drawMeter = (cx: number, cy: number, value: number, label: string) => {
+      // Meter background arc (curves downward - from PI to 2*PI, which is a frown shape)
+      ctx.beginPath();
+      ctx.arc(cx, cy, meterRadius, Math.PI, 2 * Math.PI);
+      ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+      ctx.lineWidth = 4 * scale;
+      ctx.stroke();
+
+      // Outer decorative arc
+      ctx.beginPath();
+      ctx.arc(cx, cy, meterRadius + 15 * scale, Math.PI * 1.1, Math.PI * 1.9);
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+      ctx.lineWidth = 2 * scale;
+      ctx.stroke();
+
+      // Scale markings (along the bottom arc)
+      for (let i = 0; i <= 10; i++) {
+        const markAngle = Math.PI + (i / 10) * Math.PI; // PI to 2*PI
+        const innerR = meterRadius - 15 * scale;
+        const outerR = meterRadius - 5 * scale;
+        const mx1 = cx + Math.cos(markAngle) * innerR;
+        const my1 = cy + Math.sin(markAngle) * innerR;
+        const mx2 = cx + Math.cos(markAngle) * outerR;
+        const my2 = cy + Math.sin(markAngle) * outerR;
+
+        ctx.beginPath();
+        ctx.moveTo(mx1, my1);
+        ctx.lineTo(mx2, my2);
+        ctx.strokeStyle = i > 7 ? '#ef4444' : 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = i % 2 === 0 ? 3 * scale : 2 * scale;
+        ctx.stroke();
+
+        // Scale numbers at major marks
+        if (i % 2 === 0) {
+          const textR = meterRadius - 28 * scale;
+          const tx = cx + Math.cos(markAngle) * textR;
+          const ty = cy + Math.sin(markAngle) * textR;
+          ctx.fillStyle = i > 7 ? '#ef4444' : 'rgba(255,255,255,0.4)';
+          ctx.font = `${10 * scale}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(String(i - 5), tx, ty);
+        }
+      }
+
+      // Needle (swings from left to right, pointing down into the arc)
+      const needleAngle = Math.PI + value * Math.PI; // PI (left) to 2*PI (right)
+      const needleLength = meterRadius - 20 * scale;
+      const needleX = cx + Math.cos(needleAngle) * needleLength;
+      const needleY = cy + Math.sin(needleAngle) * needleLength;
+
+      // Needle shadow
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(needleX + 2 * scale, needleY + 2 * scale);
+      ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+      ctx.lineWidth = 4 * scale;
+      ctx.stroke();
+
+      // Needle
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(needleX, needleY);
+      ctx.strokeStyle = c1;
+      ctx.lineWidth = 3 * scale;
+      ctx.shadowColor = c1;
+      ctx.shadowBlur = 15 * scale;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // Pivot point
+      ctx.beginPath();
+      ctx.arc(cx, cy, 10 * scale, 0, Math.PI * 2);
+      ctx.fillStyle = '#333';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cx, cy, 6 * scale, 0, Math.PI * 2);
+      ctx.fillStyle = c1;
+      ctx.fill();
+
+      // Label above meter
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      ctx.font = `bold ${18 * scale}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(label, cx, cy - meterRadius - 20 * scale);
+
+      // VU label
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.font = `${12 * scale}px sans-serif`;
+      ctx.fillText('VU', cx, cy - 15 * scale);
+    };
+
+    drawMeter(leftCenterX, centerY, leftVal, 'L');
+    drawMeter(rightCenterX, centerY, rightVal, 'R');
+  };
+
+  // Blob - Organic morphing metaball shape
+  const drawBlob = (ctx: CanvasRenderingContext2D, cx: number, cy: number, data: Uint8Array, time: number, c1: string, c2: string, scale: number, intensity: number) => {
+    const baseRadius = 120 * scale;
+    const points = 64;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+
+    // Draw multiple blob layers
+    for (let layer = 2; layer >= 0; layer--) {
+      const layerScale = 1 + layer * 0.3;
+      const layerAlpha = 0.3 - layer * 0.08;
+
+      ctx.beginPath();
+
+      for (let i = 0; i <= points; i++) {
+        const angle = (i / points) * Math.PI * 2;
+        const dataIndex = Math.floor((i * 2) % 128);
+        const val = data[dataIndex];
+        const normalized = Math.min(1, (val / 255) * intensity);
+
+        // Multiple frequency components for organic movement
+        const wobble1 = Math.sin(angle * 3 + time * 2) * 20 * scale * normalized;
+        const wobble2 = Math.sin(angle * 5 - time * 1.5) * 15 * scale * normalized;
+        const wobble3 = Math.sin(angle * 2 + time * 3) * 10 * scale;
+
+        const radius = baseRadius * layerScale + wobble1 + wobble2 + wobble3 + normalized * 50 * scale;
+
+        const x = Math.cos(angle) * radius;
+        const y = Math.sin(angle) * radius;
+
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+
+      ctx.closePath();
+
+      const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, baseRadius * layerScale * 1.5);
+      grad.addColorStop(0, c1);
+      grad.addColorStop(0.6, c2);
+      grad.addColorStop(1, 'transparent');
+
+      ctx.globalAlpha = layerAlpha;
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      if (layer === 0) {
+        ctx.strokeStyle = c1;
+        ctx.lineWidth = 2 * scale;
+        ctx.globalAlpha = 0.6;
+        ctx.stroke();
+      }
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.restore();
   };
 
   const drawParticles = (ctx: CanvasRenderingContext2D, w: number, h: number, time: number, bass: number, count: number, color: string, scale: number) => {
@@ -2322,7 +2818,22 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
                                  </div>
                              </div>
                          </div>
-                         
+
+                         {/* Visualizer Intensity */}
+                         <div className="space-y-3">
+                            <div className="flex justify-between text-xs font-bold text-zinc-500 uppercase">
+                                <span>Intensity</span>
+                                <span>{Math.round(config.intensity * 100)}%</span>
+                            </div>
+                            <input
+                                type="range" min="50" max="200" step="10"
+                                value={config.intensity * 100}
+                                onChange={(e) => setConfig({...config, intensity: parseInt(e.target.value) / 100})}
+                                className="w-full accent-pink-500 h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer"
+                            />
+                            <p className="text-[10px] text-zinc-500">Boost or reduce visualizer effect strength</p>
+                        </div>
+
                          {/* Particles */}
                          <div className="space-y-3">
                             <div className="flex justify-between text-xs font-bold text-zinc-500 uppercase">
