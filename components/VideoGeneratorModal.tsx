@@ -92,6 +92,101 @@ const PRESETS: { id: PresetType; label: string; icon: React.ReactNode }[] = [
   { id: 'Minimal', label: 'Clean', icon: <Type size={16} /> },
 ];
 
+// Output configuration types
+interface ResolutionPreset {
+  id: string;
+  label: string;
+  width: number;
+  height: number;
+}
+
+type AspectRatioId = 'landscape' | 'portrait' | 'square';
+
+interface AspectRatioOption {
+  id: AspectRatioId;
+  label: string;
+  ratio: number;
+}
+
+interface EncodingPreset {
+  id: string;
+  label: string;
+  description: string;
+  preset: string;
+  crf: number;
+  tune: string;
+}
+
+interface OutputConfig {
+  aspectRatio: AspectRatioId;
+  resolution: ResolutionPreset;
+  customWidth: number;
+  customHeight: number;
+  useCustomResolution: boolean;
+  encoding: EncodingPreset;
+  frameRate: 24 | 30 | 60;
+  audioBitrate: number;
+}
+
+// Aspect ratio options
+const ASPECT_RATIOS: AspectRatioOption[] = [
+  { id: 'landscape', label: 'Landscape', ratio: 16/9 },
+  { id: 'portrait', label: 'Portrait', ratio: 9/16 },
+  { id: 'square', label: 'Square', ratio: 1 },
+];
+
+// Resolution presets per aspect ratio
+const RESOLUTION_PRESETS: Record<AspectRatioId, ResolutionPreset[]> = {
+  landscape: [
+    { id: '240p', label: '240p', width: 426, height: 240 },
+    { id: '360p', label: '360p', width: 640, height: 360 },
+    { id: '480p', label: '480p SD', width: 854, height: 480 },
+    { id: '720p', label: '720p HD', width: 1280, height: 720 },
+    { id: '1080p', label: '1080p Full HD', width: 1920, height: 1080 },
+    { id: '1440p', label: '1440p QHD', width: 2560, height: 1440 },
+    { id: '4k', label: '4K Ultra HD', width: 3840, height: 2160 },
+  ],
+  portrait: [
+    { id: '240p', label: '240p', width: 240, height: 426 },
+    { id: '360p', label: '360p', width: 360, height: 640 },
+    { id: '480p', label: '480p', width: 480, height: 854 },
+    { id: '720p', label: '720p HD', width: 720, height: 1280 },
+    { id: '1080p', label: '1080p Full HD', width: 1080, height: 1920 },
+    { id: '1440p', label: '1440p QHD', width: 1440, height: 2560 },
+    { id: '4k', label: '4K', width: 2160, height: 3840 },
+  ],
+  square: [
+    { id: '240p', label: '240p', width: 240, height: 240 },
+    { id: '360p', label: '360p', width: 360, height: 360 },
+    { id: '480p', label: '480p', width: 480, height: 480 },
+    { id: '720p', label: '720p', width: 720, height: 720 },
+    { id: '1080p', label: '1080p', width: 1080, height: 1080 },
+    { id: '1440p', label: '1440p', width: 1440, height: 1440 },
+    { id: '4k', label: '4K', width: 2160, height: 2160 },
+  ],
+};
+
+const ENCODING_PRESETS: EncodingPreset[] = [
+  { id: 'fast', label: 'Fast Export', description: 'Quick encoding, larger file', preset: 'ultrafast', crf: 28, tune: 'fastdecode' },
+  { id: 'balanced', label: 'Balanced', description: 'Good quality, reasonable speed', preset: 'fast', crf: 23, tune: 'film' },
+  { id: 'quality', label: 'High Quality', description: 'Better quality, slower', preset: 'medium', crf: 20, tune: 'film' },
+  { id: 'max', label: 'Maximum Quality', description: 'Best quality, slowest', preset: 'slow', crf: 18, tune: 'film' },
+];
+
+const FRAME_RATE_OPTIONS = [
+  { value: 24 as const, label: '24 fps', description: 'Cinematic' },
+  { value: 30 as const, label: '30 fps', description: 'Standard' },
+  { value: 60 as const, label: '60 fps', description: 'Smooth' },
+];
+
+const AUDIO_BITRATE_OPTIONS = [
+  { value: 96, label: '96 kbps' },
+  { value: 128, label: '128 kbps' },
+  { value: 192, label: '192 kbps' },
+  { value: 256, label: '256 kbps' },
+  { value: 320, label: '320 kbps' },
+];
+
 function ColumnsIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -124,7 +219,15 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
   const [backgroundSeed, setBackgroundSeed] = useState(Date.now());
   const [customImage, setCustomImage] = useState<string | null>(null);
   const [videoUrl, setVideoUrl] = useState<string>('');
+  const [backgroundFit, setBackgroundFit] = useState<'stretch' | 'cover'>('stretch');
+  const [backgroundPosition, setBackgroundPosition] = useState(50); // 0-100, 50 = centered
   const bgVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Refs for background settings in export
+  const backgroundFitRef = useRef(backgroundFit);
+  const backgroundPositionRef = useRef(backgroundPosition);
+  useEffect(() => { backgroundFitRef.current = backgroundFit; }, [backgroundFit]);
+  useEffect(() => { backgroundPositionRef.current = backgroundPosition; }, [backgroundPosition]);
 
   // Custom Album Art
   const [customAlbumArt, setCustomAlbumArt] = useState<string | null>(null);
@@ -190,6 +293,24 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
     letterbox: 0.5
   });
 
+  // Output Config State
+  const [outputConfig, setOutputConfig] = useState<OutputConfig>({
+    aspectRatio: 'landscape',
+    resolution: RESOLUTION_PRESETS.landscape[4], // 1080p default
+    customWidth: 1920,
+    customHeight: 1080,
+    useCustomResolution: false,
+    encoding: ENCODING_PRESETS[0], // Fast default
+    frameRate: 30,
+    audioBitrate: 128,
+  });
+
+  const outputConfigRef = useRef(outputConfig);
+  useEffect(() => { outputConfigRef.current = outputConfig; }, [outputConfig]);
+
+  // Helper to get current resolution options based on aspect ratio
+  const currentResolutionOptions = RESOLUTION_PRESETS[outputConfig.aspectRatio];
+
   // Text Layers State
   const [textLayers, setTextLayers] = useState<TextLayer[]>([]);
 
@@ -251,17 +372,20 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       return;
     }
 
+    const bgWidth = outputConfig.useCustomResolution ? outputConfig.customWidth : outputConfig.resolution.width;
+    const bgHeight = outputConfig.useCustomResolution ? outputConfig.customHeight : outputConfig.resolution.height;
+
     const img = new Image();
     img.crossOrigin = "Anonymous";
     if (backgroundType === 'custom' && customImage) {
       img.src = customImage;
     } else {
-      img.src = `https://picsum.photos/seed/${backgroundSeed}/1920/1080?blur=4`;
+      img.src = `https://picsum.photos/seed/${backgroundSeed}/${bgWidth}/${bgHeight}?blur=4`;
     }
     img.onload = () => {
       bgImageRef.current = img;
     };
-  }, [backgroundSeed, backgroundType, customImage]);
+  }, [backgroundSeed, backgroundType, customImage, outputConfig.resolution, outputConfig.customWidth, outputConfig.customHeight, outputConfig.useCustomResolution]);
 
   // Load Background Video
   useEffect(() => {
@@ -464,19 +588,31 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
   const renderOffline = async () => {
     if (!song || !ffmpegRef.current) return;
 
+    // Get output dimensions from config
+    const config = outputConfigRef.current;
+    const outputWidth = config.useCustomResolution ? config.customWidth : config.resolution.width;
+    const outputHeight = config.useCustomResolution ? config.customHeight : config.resolution.height;
+
+    // Ensure even dimensions for video encoding
+    const targetWidth = Math.floor(outputWidth / 2) * 2;
+    const targetHeight = Math.floor(outputHeight / 2) * 2;
+
     // Create a separate clean canvas to avoid tainted canvas issues
     const canvas = document.createElement('canvas');
-    canvas.width = 1920;
-    canvas.height = 1080;
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     const ffmpeg = ffmpegRef.current;
-    const fps = 30;
+    const fps = config.frameRate;
     const width = canvas.width;
     const height = canvas.height;
     const centerX = width / 2;
     const centerY = height / 2;
+
+    // Scale factor for all drawing operations (reference is 1080p)
+    const scale = Math.min(width, height) / 1080;
 
     setExportProgress(1);
 
@@ -592,15 +728,15 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
         // Seek video to current frame time (loop if video is shorter)
         const videoTime = time % (bgVideo.duration || 1);
         bgVideo.currentTime = videoTime;
-        // Wait for seek to complete
+        // Wait for seek to complete (shorter timeout for better performance)
         await new Promise<void>((resolve) => {
           const onSeeked = () => {
             bgVideo!.removeEventListener('seeked', onSeeked);
             resolve();
           };
           bgVideo!.addEventListener('seeked', onSeeked);
-          // Fallback timeout in case seeked never fires
-          setTimeout(resolve, 50);
+          // Shorter fallback timeout - video seek is often instant for loaded videos
+          setTimeout(resolve, 10);
         });
         bgSource = bgVideo;
       }
@@ -610,7 +746,7 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
         ctx.globalAlpha = 1 - currentConfig.bgDim;
 
         if (currentEffects.shake && normBass > (0.6 - (currentIntensities.shake * 0.3))) {
-          const magnitude = currentIntensities.shake * 50;
+          const magnitude = currentIntensities.shake * 50 * scale;
           const shakeX = (Math.random() - 0.5) * magnitude * normBass;
           const shakeY = (Math.random() - 0.5) * magnitude * normBass;
           ctx.translate(shakeX, shakeY);
@@ -619,14 +755,50 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
         const zoom = 1 + (Math.sin(time * 0.5) * 0.05);
         ctx.translate(centerX, centerY);
         ctx.scale(zoom, zoom);
-        ctx.drawImage(bgSource, -width/2, -height/2, width, height);
+
+        if (backgroundFitRef.current === 'cover') {
+            // Calculate scale to cover canvas while maintaining aspect ratio
+            const imgWidth = bgSource instanceof HTMLVideoElement ? bgSource.videoWidth : bgSource.naturalWidth;
+            const imgHeight = bgSource instanceof HTMLVideoElement ? bgSource.videoHeight : bgSource.naturalHeight;
+
+            if (imgWidth > 0 && imgHeight > 0) {
+                const canvasRatio = width / height;
+                const imgRatio = imgWidth / imgHeight;
+
+                let drawWidth: number, drawHeight: number, offsetX: number, offsetY: number;
+
+                if (imgRatio > canvasRatio) {
+                    // Image is wider than canvas - scale by height, allow horizontal positioning
+                    drawHeight = height;
+                    drawWidth = height * imgRatio;
+                    const maxOffset = (drawWidth - width) / 2;
+                    offsetX = -drawWidth / 2 + (backgroundPositionRef.current / 100 - 0.5) * maxOffset * 2;
+                    offsetY = -drawHeight / 2;
+                } else {
+                    // Image is taller than canvas - scale by width, allow vertical positioning
+                    drawWidth = width;
+                    drawHeight = width / imgRatio;
+                    const maxOffset = (drawHeight - height) / 2;
+                    offsetX = -drawWidth / 2;
+                    offsetY = -drawHeight / 2 + (backgroundPositionRef.current / 100 - 0.5) * maxOffset * 2;
+                }
+
+                ctx.drawImage(bgSource, offsetX, offsetY, drawWidth, drawHeight);
+            } else {
+                // Fallback to stretch if dimensions not available
+                ctx.drawImage(bgSource, -width/2, -height/2, width, height);
+            }
+        } else {
+            // Stretch mode (original behavior)
+            ctx.drawImage(bgSource, -width/2, -height/2, width, height);
+        }
         ctx.restore();
       }
 
       // Draw preset
       ctx.save();
       if (currentEffects.shake && normBass > 0.6) {
-        const magnitude = currentIntensities.shake * 30;
+        const magnitude = currentIntensities.shake * 30 * scale;
         const shakeX = (Math.random() - 0.5) * magnitude * normBass;
         const shakeY = (Math.random() - 0.5) * magnitude * normBass;
         ctx.translate(shakeX, shakeY);
@@ -634,51 +806,53 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
 
       switch(currentConfig.preset) {
         case 'NCS Circle':
-          drawNCSCircle(ctx, centerX, centerY, dataArray, pulse, time, currentConfig.primaryColor, currentConfig.secondaryColor);
+          drawNCSCircle(ctx, centerX, centerY, dataArray, pulse, time, currentConfig.primaryColor, currentConfig.secondaryColor, scale);
           break;
         case 'Linear Bars':
-          drawLinearBars(ctx, width, height, dataArray, currentConfig.primaryColor, currentConfig.secondaryColor);
+          drawLinearBars(ctx, width, height, dataArray, currentConfig.primaryColor, currentConfig.secondaryColor, scale);
           break;
         case 'Dual Mirror':
-          drawDualMirror(ctx, width, height, dataArray, currentConfig.primaryColor);
+          drawDualMirror(ctx, width, height, dataArray, currentConfig.primaryColor, scale);
           break;
         case 'Center Wave':
-          drawCenterWave(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor);
+          drawCenterWave(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor, scale);
           break;
         case 'Orbital':
-          drawOrbital(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor, currentConfig.secondaryColor);
+          drawOrbital(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor, currentConfig.secondaryColor, scale);
           break;
         case 'Hexagon':
-          drawHexagon(ctx, centerX, centerY, dataArray, pulse, time, currentConfig.primaryColor);
+          drawHexagon(ctx, centerX, centerY, dataArray, pulse, time, currentConfig.primaryColor, scale);
           break;
         case 'Oscilloscope':
-          drawOscilloscope(ctx, width, height, timeDomain, currentConfig.primaryColor);
+          drawOscilloscope(ctx, width, height, timeDomain, currentConfig.primaryColor, scale);
           break;
         case 'Digital Rain':
-          drawDigitalRain(ctx, width, height, dataArray, time, currentConfig.primaryColor);
+          drawDigitalRain(ctx, width, height, dataArray, time, currentConfig.primaryColor, scale);
           break;
         case 'Shockwave':
-          drawShockwave(ctx, centerX, centerY, bass, time, currentConfig.primaryColor);
+          drawShockwave(ctx, centerX, centerY, bass, time, currentConfig.primaryColor, scale);
           break;
       }
 
-      drawParticles(ctx, width, height, time, bass, currentConfig.particleCount, currentConfig.primaryColor);
+      drawParticles(ctx, width, height, time, bass, currentConfig.particleCount, currentConfig.primaryColor, scale);
 
+      // Album art size scales with resolution
+      const albumRadius = 150 * scale;
       if (['NCS Circle', 'Hexagon', 'Orbital', 'Shockwave'].includes(currentConfig.preset) && albumImage) {
         // Draw album art inline with pre-loaded image
         ctx.save();
         ctx.translate(centerX, centerY);
         ctx.scale(pulse, pulse);
-        ctx.shadowBlur = 40;
+        ctx.shadowBlur = 40 * scale;
         ctx.shadowColor = currentConfig.primaryColor;
         ctx.beginPath();
-        ctx.arc(0, 0, 150, 0, Math.PI * 2);
+        ctx.arc(0, 0, albumRadius, 0, Math.PI * 2);
         ctx.closePath();
-        ctx.lineWidth = 5;
+        ctx.lineWidth = 5 * scale;
         ctx.strokeStyle = 'white';
         ctx.stroke();
         ctx.clip();
-        ctx.drawImage(albumImage, -150, -150, 300, 300);
+        ctx.drawImage(albumImage, -albumRadius, -albumRadius, albumRadius * 2, albumRadius * 2);
         ctx.restore();
       }
 
@@ -699,14 +873,15 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       }
 
       // Draw text layers
-      ctx.shadowBlur = 10;
+      ctx.shadowBlur = 10 * scale;
       ctx.shadowColor = 'black';
       ctx.textAlign = 'center';
 
       currentTexts.forEach(layer => {
         ctx.fillStyle = layer.color;
-        const dynamicSize = layer.id === '1' && currentConfig.preset === 'Minimal' ? layer.size * pulse : layer.size;
-        ctx.font = `bold ${dynamicSize}px ${layer.font}, sans-serif`;
+        const baseSize = layer.id === '1' && currentConfig.preset === 'Minimal' ? layer.size * pulse : layer.size;
+        const scaledSize = baseSize * scale;
+        ctx.font = `bold ${scaledSize}px ${layer.font}, sans-serif`;
         const xPos = (layer.x / 100) * width;
         const yPos = (layer.y / 100) * height;
         ctx.fillText(layer.text, xPos, yPos);
@@ -715,16 +890,18 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       ctx.restore();
 
       // Apply post-processing effects
+      const scanlineGap = Math.max(2, Math.round(4 * scale));
+      const scanlineHeight = Math.max(1, Math.round(2 * scale));
       if (currentEffects.scanlines || currentEffects.cctv) {
         ctx.fillStyle = `rgba(0,0,0,${currentIntensities.scanlines * 0.8})`;
-        for (let i = 0; i < height; i += 4) {
-          ctx.fillRect(0, i, width, 2);
+        for (let i = 0; i < height; i += scanlineGap) {
+          ctx.fillRect(0, i, width, scanlineHeight);
         }
       }
 
       if (currentEffects.vhs || currentEffects.chromatic || (currentEffects.glitch && Math.random() > (1 - currentIntensities.glitch))) {
         const intensity = currentEffects.vhs ? currentIntensities.vhs : currentIntensities.chromatic;
-        const offset = (10 * intensity) * normBass;
+        const offset = (10 * scale * intensity) * normBass;
         ctx.globalCompositeOperation = 'screen';
         ctx.fillStyle = `rgba(255,0,0,${0.2 * intensity})`;
         ctx.fillRect(-offset, 0, width, height);
@@ -735,7 +912,7 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
 
       if (currentEffects.glitch && Math.random() > (1 - currentIntensities.glitch)) {
         ctx.fillStyle = Math.random() > 0.5 ? currentConfig.primaryColor : '#fff';
-        ctx.fillRect(Math.random() * width, Math.random() * height, Math.random() * 200, 4);
+        ctx.fillRect(Math.random() * width, Math.random() * height, Math.random() * 200 * scale, 4 * scale);
       }
 
       if (currentEffects.cctv) {
@@ -757,7 +934,7 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       if (currentEffects.bloom) {
         const intensity = currentIntensities.bloom;
         ctx.globalCompositeOperation = 'screen';
-        ctx.filter = `blur(${15 * intensity}px)`;
+        ctx.filter = `blur(${15 * scale * intensity}px)`;
         ctx.globalAlpha = 0.4 * intensity;
         ctx.drawImage(canvas, 0, 0);
         ctx.filter = 'none';
@@ -814,8 +991,9 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
         ctx.fillRect(0, height - barHeight, width, barHeight);
       }
 
-      // Capture frame
-      const frameData = canvas.toDataURL('image/jpeg', 0.85);
+      // Capture frame - use lower JPEG quality for lower resolutions (faster encoding)
+      const jpegQuality = width <= 480 ? 0.7 : width <= 720 ? 0.8 : 0.85;
+      const frameData = canvas.toDataURL('image/jpeg', jpegQuality);
       const base64Data = frameData.split(',')[1];
       const binaryData = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
       await ffmpeg.writeFile(`frame${String(frameIndex).padStart(6, '0')}.jpg`, binaryData);
@@ -837,6 +1015,7 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
 
     // Encode video - use ultrafast preset for browser performance
     console.log(`[Video] Encoding ${totalFrames} frames at ${fps}fps...`);
+    console.log(`[Video] Using preset: ${config.encoding.preset}, CRF: ${config.encoding.crf}, Audio: ${config.audioBitrate}k`);
     console.log('[Video] This may take a while in the browser. Please wait...');
 
     const encodeResult = await ffmpeg.exec([
@@ -844,12 +1023,12 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       '-i', 'frame%06d.jpg',
       '-i', 'audio.mp3',
       '-c:v', 'libx264',
-      '-preset', 'ultrafast',  // Fastest encoding
-      '-tune', 'fastdecode',   // Optimize for fast decoding
-      '-crf', '28',            // Slightly lower quality but much faster
+      '-preset', config.encoding.preset,
+      '-tune', config.encoding.tune,
+      '-crf', String(config.encoding.crf),
       '-pix_fmt', 'yuv420p',
       '-c:a', 'aac',
-      '-b:a', '128k',          // Lower bitrate audio
+      '-b:a', `${config.audioBitrate}k`,
       '-shortest',
       '-movflags', '+faststart',
       'output.mp4'
@@ -1048,6 +1227,9 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
     const centerY = height / 2;
     const time = Date.now() / 1000;
 
+    // Scale factor for drawing (reference is 1080p)
+    const scale = Math.min(width, height) / 1080;
+
     // Data
     const bufferLength = analyserRef.current.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
@@ -1079,7 +1261,7 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
 
         // Shake Effect (Camera)
         if (currentEffects.shake && normBass > (0.6 - (currentIntensities.shake * 0.3))) {
-             const magnitude = currentIntensities.shake * 50;
+             const magnitude = currentIntensities.shake * 50 * scale;
              const shakeX = (Math.random() - 0.5) * magnitude * normBass;
              const shakeY = (Math.random() - 0.5) * magnitude * normBass;
              ctx.translate(shakeX, shakeY);
@@ -1088,16 +1270,52 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
         const zoom = 1 + (Math.sin(time * 0.5) * 0.05);
         ctx.translate(centerX, centerY);
         ctx.scale(zoom, zoom);
-        ctx.drawImage(bgSource, -width/2, -height/2, width, height);
+
+        if (backgroundFitRef.current === 'cover') {
+            // Calculate scale to cover canvas while maintaining aspect ratio
+            const imgWidth = bgSource instanceof HTMLVideoElement ? bgSource.videoWidth : bgSource.naturalWidth;
+            const imgHeight = bgSource instanceof HTMLVideoElement ? bgSource.videoHeight : bgSource.naturalHeight;
+
+            if (imgWidth > 0 && imgHeight > 0) {
+                const canvasRatio = width / height;
+                const imgRatio = imgWidth / imgHeight;
+
+                let drawWidth: number, drawHeight: number, offsetX: number, offsetY: number;
+
+                if (imgRatio > canvasRatio) {
+                    // Image is wider than canvas - scale by height, allow horizontal positioning
+                    drawHeight = height;
+                    drawWidth = height * imgRatio;
+                    const maxOffset = (drawWidth - width) / 2;
+                    offsetX = -drawWidth / 2 + (backgroundPositionRef.current / 100 - 0.5) * maxOffset * 2;
+                    offsetY = -drawHeight / 2;
+                } else {
+                    // Image is taller than canvas - scale by width, allow vertical positioning
+                    drawWidth = width;
+                    drawHeight = width / imgRatio;
+                    const maxOffset = (drawHeight - height) / 2;
+                    offsetX = -drawWidth / 2;
+                    offsetY = -drawHeight / 2 + (backgroundPositionRef.current / 100 - 0.5) * maxOffset * 2;
+                }
+
+                ctx.drawImage(bgSource, offsetX, offsetY, drawWidth, drawHeight);
+            } else {
+                // Fallback to stretch if dimensions not available
+                ctx.drawImage(bgSource, -width/2, -height/2, width, height);
+            }
+        } else {
+            // Stretch mode (original behavior)
+            ctx.drawImage(bgSource, -width/2, -height/2, width, height);
+        }
         ctx.restore();
     }
 
     // --- 2. PRESET DRAWING ---
     ctx.save();
-    
+
     // Apply Shake to visual elements
     if (currentEffects.shake && normBass > 0.6) {
-         const magnitude = currentIntensities.shake * 30;
+         const magnitude = currentIntensities.shake * 30 * scale;
          const shakeX = (Math.random() - 0.5) * magnitude * normBass;
          const shakeY = (Math.random() - 0.5) * magnitude * normBass;
          ctx.translate(shakeX, shakeY);
@@ -1105,35 +1323,35 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
 
     switch(currentConfig.preset) {
         case 'NCS Circle':
-            drawNCSCircle(ctx, centerX, centerY, dataArray, pulse, time, currentConfig.primaryColor, currentConfig.secondaryColor);
+            drawNCSCircle(ctx, centerX, centerY, dataArray, pulse, time, currentConfig.primaryColor, currentConfig.secondaryColor, scale);
             break;
         case 'Linear Bars':
-            drawLinearBars(ctx, width, height, dataArray, currentConfig.primaryColor, currentConfig.secondaryColor);
+            drawLinearBars(ctx, width, height, dataArray, currentConfig.primaryColor, currentConfig.secondaryColor, scale);
             break;
         case 'Dual Mirror':
-            drawDualMirror(ctx, width, height, dataArray, currentConfig.primaryColor);
+            drawDualMirror(ctx, width, height, dataArray, currentConfig.primaryColor, scale);
             break;
         case 'Center Wave':
-            drawCenterWave(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor);
+            drawCenterWave(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor, scale);
             break;
         case 'Orbital':
-            drawOrbital(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor, currentConfig.secondaryColor);
+            drawOrbital(ctx, centerX, centerY, dataArray, time, currentConfig.primaryColor, currentConfig.secondaryColor, scale);
             break;
         case 'Hexagon':
-            drawHexagon(ctx, centerX, centerY, dataArray, pulse, time, currentConfig.primaryColor);
+            drawHexagon(ctx, centerX, centerY, dataArray, pulse, time, currentConfig.primaryColor, scale);
             break;
         case 'Oscilloscope':
-            drawOscilloscope(ctx, width, height, timeDomain, currentConfig.primaryColor);
+            drawOscilloscope(ctx, width, height, timeDomain, currentConfig.primaryColor, scale);
             break;
         case 'Digital Rain':
-            drawDigitalRain(ctx, width, height, dataArray, time, currentConfig.primaryColor);
+            drawDigitalRain(ctx, width, height, dataArray, time, currentConfig.primaryColor, scale);
             break;
         case 'Shockwave':
-             drawShockwave(ctx, centerX, centerY, bass, time, currentConfig.primaryColor);
+             drawShockwave(ctx, centerX, centerY, bass, time, currentConfig.primaryColor, scale);
              break;
     }
-    
-    drawParticles(ctx, width, height, time, bass, currentConfig.particleCount, currentConfig.primaryColor);
+
+    drawParticles(ctx, width, height, time, bass, currentConfig.particleCount, currentConfig.primaryColor, scale);
 
     if (['NCS Circle', 'Hexagon', 'Orbital', 'Shockwave'].includes(currentConfig.preset)) {
         const rawAlbumArtUrl = customAlbumArt || song.coverUrl;
@@ -1141,7 +1359,7 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
         const albumArtUrl = rawAlbumArtUrl.startsWith('http')
             ? `/api/proxy/image?url=${encodeURIComponent(rawAlbumArtUrl)}`
             : rawAlbumArtUrl;
-        drawAlbumArt(ctx, centerX, centerY, pulse, albumArtUrl, currentConfig.primaryColor, customAlbumArtImageRef.current);
+        drawAlbumArt(ctx, centerX, centerY, pulse, albumArtUrl, currentConfig.primaryColor, scale, customAlbumArtImageRef.current);
     }
 
     // Pixelate effect (applied before text so text stays sharp)
@@ -1161,38 +1379,41 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
     }
 
     // --- 3. CUSTOM TEXT LAYERS ---
-    ctx.shadowBlur = 10;
+    ctx.shadowBlur = 10 * scale;
     ctx.shadowColor = 'black';
     ctx.textAlign = 'center';
 
     currentTexts.forEach(layer => {
         ctx.fillStyle = layer.color;
         // Adjust font size by pulse for title-like layers if needed, here we do static or slight pulse
-        const dynamicSize = layer.id === '1' && currentConfig.preset === 'Minimal' ? layer.size * pulse : layer.size;
-        ctx.font = `bold ${dynamicSize}px ${layer.font}, sans-serif`;
-        
+        const baseSize = layer.id === '1' && currentConfig.preset === 'Minimal' ? layer.size * pulse : layer.size;
+        const scaledSize = baseSize * scale;
+        ctx.font = `bold ${scaledSize}px ${layer.font}, sans-serif`;
+
         const xPos = (layer.x / 100) * width;
         const yPos = (layer.y / 100) * height;
-        
+
         ctx.fillText(layer.text, xPos, yPos);
     });
 
     ctx.restore();
 
     // --- 4. POST-PROCESSING EFFECTS ---
-    
+
     // Scanlines
+    const scanlineGap = Math.max(2, Math.round(4 * scale));
+    const scanlineHeight = Math.max(1, Math.round(2 * scale));
     if (currentEffects.scanlines || currentEffects.cctv) {
         ctx.fillStyle = `rgba(0,0,0,${currentIntensities.scanlines * 0.8})`;
-        for (let i = 0; i < height; i+=4) {
-            ctx.fillRect(0, i, width, 2);
+        for (let i = 0; i < height; i += scanlineGap) {
+            ctx.fillRect(0, i, width, scanlineHeight);
         }
     }
 
     // VHS Color Shift / Chromatic Aberration
     if (currentEffects.vhs || currentEffects.chromatic || (currentEffects.glitch && Math.random() > (1 - currentIntensities.glitch))) {
         const intensity = currentEffects.vhs ? currentIntensities.vhs : currentIntensities.chromatic;
-        const offset = (10 * intensity) * normBass;
+        const offset = (10 * scale * intensity) * normBass;
         ctx.globalCompositeOperation = 'screen';
 
         // Red Shift - draw colored rectangle offset left
@@ -1208,15 +1429,15 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
 
     // Glitch Slices
     if (currentEffects.glitch && Math.random() > (1 - currentIntensities.glitch)) {
-        const sliceHeight = Math.random() * 50;
+        const sliceHeight = Math.random() * 50 * scale;
         const sliceY = Math.random() * height;
-        const offset = (Math.random() - 0.5) * 40 * currentIntensities.glitch;
-        
+        const offset = (Math.random() - 0.5) * 40 * scale * currentIntensities.glitch;
+
         ctx.drawImage(canvas, 0, sliceY, width, sliceHeight, offset, sliceY, width, sliceHeight);
-        
+
         // Random colored block
         ctx.fillStyle = Math.random() > 0.5 ? currentConfig.primaryColor : '#fff';
-        ctx.fillRect(Math.random()*width, Math.random()*height, Math.random()*200, 4);
+        ctx.fillRect(Math.random()*width, Math.random()*height, Math.random() * 200 * scale, 4 * scale);
     }
 
     // CCTV Vignette & Grain
@@ -1237,18 +1458,19 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
 
         // Date Stamp
         ctx.globalCompositeOperation = 'source-over';
-        ctx.font = 'mono 24px monospace';
+        const cctvFontSize = Math.round(24 * scale);
+        ctx.font = `mono ${cctvFontSize}px monospace`;
         ctx.fillStyle = 'white';
         ctx.shadowColor = 'black';
-        ctx.fillText(new Date().toLocaleString().toUpperCase(), 60, 60);
-        ctx.fillText("REC ●", width - 120, 60);
+        ctx.fillText(new Date().toLocaleString().toUpperCase(), 60 * scale, 60 * scale);
+        ctx.fillText("REC ●", width - 120 * scale, 60 * scale);
     }
 
     // Bloom / Glow effect
     if (currentEffects.bloom) {
         const intensity = currentIntensities.bloom;
         ctx.globalCompositeOperation = 'screen';
-        ctx.filter = `blur(${15 * intensity}px)`;
+        ctx.filter = `blur(${15 * scale * intensity}px)`;
         ctx.globalAlpha = 0.4 * intensity;
         ctx.drawImage(canvas, 0, 0);
         ctx.filter = 'none';
@@ -1310,8 +1532,8 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
 
   // --- DRAWING FUNCTIONS ---
   // (Reusing existing drawing functions from previous step, ensuring they use updated args)
-  const drawNCSCircle = (ctx: CanvasRenderingContext2D, cx: number, cy: number, data: Uint8Array, pulse: number, time: number, c1: string, c2: string) => {
-    const radius = 150 + (pulse - 1) * 50;
+  const drawNCSCircle = (ctx: CanvasRenderingContext2D, cx: number, cy: number, data: Uint8Array, pulse: number, time: number, c1: string, c2: string, scale: number) => {
+    const radius = (150 + (pulse - 1) * 50) * scale;
     const bars = 80;
     const step = (Math.PI * 2) / bars;
     ctx.save();
@@ -1320,7 +1542,9 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
     for (let i = 0; i < bars; i++) {
         const val = data[i + 10];
         const normalized = val / 255;
-        const h = 8 + Math.pow(normalized, 1.5) * 120;
+        const h = (8 + Math.pow(normalized, 1.5) * 120) * scale;
+        const barWidth = 6 * scale;
+        const barRadius = 3 * scale;
         ctx.save();
         ctx.rotate(i * step);
         const grad = ctx.createLinearGradient(0, radius, 0, radius + h);
@@ -1328,30 +1552,30 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
         grad.addColorStop(1, c2);
         ctx.fillStyle = grad;
         ctx.beginPath();
-        ctx.roundRect(-3, radius + 10, 6, h, 3);
+        ctx.roundRect(-barWidth/2, radius + 10 * scale, barWidth, h, barRadius);
         ctx.fill();
         ctx.fillStyle = 'rgba(255,255,255,0.15)';
         ctx.beginPath();
-        ctx.roundRect(-3, radius + 10 + h + 2, 6, 3, 2);
+        ctx.roundRect(-barWidth/2, radius + 10 * scale + h + 2 * scale, barWidth, 3 * scale, 2 * scale);
         ctx.fill();
         ctx.restore();
     }
     ctx.beginPath();
-    ctx.arc(0, 0, radius + 150, 0, Math.PI * 2);
+    ctx.arc(0, 0, radius + 150 * scale, 0, Math.PI * 2);
     ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 1 * scale;
     ctx.stroke();
     ctx.restore();
   };
 
-  const drawLinearBars = (ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8Array, c1: string, c2: string) => {
+  const drawLinearBars = (ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8Array, c1: string, c2: string, scale: number) => {
       const bars = 64;
       const barW = w / bars;
-      const gap = 2;
+      const gap = 2 * scale;
       for(let i=0; i<bars; i++) {
           const val = data[i * 2];
           const normalized = val / 255;
-          const barH = 10 + Math.pow(normalized, 1.3) * (h * 0.35);
+          const barH = (10 * scale) + Math.pow(normalized, 1.3) * (h * 0.35);
           const grad = ctx.createLinearGradient(0, h/2, 0, h/2 - barH);
           grad.addColorStop(0, c1);
           grad.addColorStop(1, c2);
@@ -1361,38 +1585,38 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
           ctx.fillRect(i * barW + gap/2, h/2, barW - gap, barH * 0.3);
       }
       ctx.fillStyle = 'rgba(255,255,255,0.5)';
-      ctx.fillRect(0, h/2, w, 1);
+      ctx.fillRect(0, h/2, w, 1 * scale);
   };
 
-  const drawDualMirror = (ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8Array, color: string) => {
+  const drawDualMirror = (ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8Array, color: string, scale: number) => {
       const bars = 40;
       const barH = h / bars;
       const cy = h/2;
       for(let i=0; i<bars; i++) {
           const val = data[i*3];
           const normalized = val / 255;
-          const len = 20 + Math.pow(normalized, 1.4) * (w * 0.3);
+          const len = (20 * scale) + Math.pow(normalized, 1.4) * (w * 0.3);
           const alpha = 0.4 + normalized * 0.6;
           ctx.fillStyle = color;
           ctx.globalAlpha = alpha;
-          ctx.fillRect(0, cy - (i*barH), len, barH-2);
-          ctx.fillRect(0, cy + (i*barH), len, barH-2);
-          ctx.fillRect(w - len, cy - (i*barH), len, barH-2);
-          ctx.fillRect(w - len, cy + (i*barH), len, barH-2);
+          ctx.fillRect(0, cy - (i*barH), len, barH - 2 * scale);
+          ctx.fillRect(0, cy + (i*barH), len, barH - 2 * scale);
+          ctx.fillRect(w - len, cy - (i*barH), len, barH - 2 * scale);
+          ctx.fillRect(w - len, cy + (i*barH), len, barH - 2 * scale);
       }
       ctx.globalAlpha = 1;
   };
 
-  const drawOrbital = (ctx: CanvasRenderingContext2D, cx: number, cy: number, data: Uint8Array, time: number, c1: string, c2: string) => {
+  const drawOrbital = (ctx: CanvasRenderingContext2D, cx: number, cy: number, data: Uint8Array, time: number, c1: string, c2: string, scale: number) => {
       for(let i=0; i<5; i++) {
-          const r = 100 + (i * 55);
+          const r = (100 + (i * 55)) * scale;
           const val = data[i*10];
           const normalized = val / 255;
-          const width = 4 + normalized * 6;
+          const width = (4 + normalized * 6) * scale;
           ctx.beginPath();
           ctx.strokeStyle = i % 2 === 0 ? c1 : c2;
           ctx.lineWidth = width;
-          ctx.shadowBlur = 20;
+          ctx.shadowBlur = 20 * scale;
           ctx.shadowColor = ctx.strokeStyle;
           const direction = i % 2 === 0 ? 1 : -1;
           const speed = direction * (0.5 + i * 0.1);
@@ -1404,17 +1628,17 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       ctx.shadowBlur = 0;
   };
 
-  const drawHexagon = (ctx: CanvasRenderingContext2D, cx: number, cy: number, data: Uint8Array, pulse: number, time: number, color: string) => {
+  const drawHexagon = (ctx: CanvasRenderingContext2D, cx: number, cy: number, data: Uint8Array, pulse: number, time: number, color: string, scale: number) => {
       const sides = 6;
-      const r = 180 * pulse;
+      const r = 180 * pulse * scale;
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(time * 0.4);
       ctx.beginPath();
-      ctx.lineWidth = 12;
+      ctx.lineWidth = 12 * scale;
       ctx.strokeStyle = color;
       ctx.lineJoin = 'round';
-      ctx.shadowBlur = 25;
+      ctx.shadowBlur = 25 * scale;
       ctx.shadowColor = color;
       for(let i=0; i<=sides; i++) {
           const angle = i * 2 * Math.PI / sides;
@@ -1428,10 +1652,10 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       ctx.shadowBlur = 0;
   };
 
-  const drawOscilloscope = (ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8Array, color: string) => {
-      ctx.lineWidth = 3;
+  const drawOscilloscope = (ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8Array, color: string, scale: number) => {
+      ctx.lineWidth = 3 * scale;
       ctx.strokeStyle = color;
-      ctx.shadowBlur = 15;
+      ctx.shadowBlur = 15 * scale;
       ctx.shadowColor = color;
       ctx.beginPath();
       const sliceWidth = w / data.length;
@@ -1448,24 +1672,24 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
 
       ctx.strokeStyle = 'rgba(255,255,255,0.1)';
       ctx.shadowBlur = 0;
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 1 * scale;
       ctx.beginPath();
       ctx.moveTo(0, h/2);
       ctx.lineTo(w, h/2);
       ctx.stroke();
   };
   
-  const drawCenterWave = (ctx: CanvasRenderingContext2D, cx: number, cy: number, data: Uint8Array, time: number, color: string) => {
+  const drawCenterWave = (ctx: CanvasRenderingContext2D, cx: number, cy: number, data: Uint8Array, time: number, color: string, scale: number) => {
       ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
-      ctx.shadowBlur = 8;
+      ctx.lineWidth = 2 * scale;
+      ctx.shadowBlur = 8 * scale;
       ctx.shadowColor = color;
       for(let i=0; i<12; i++) {
           ctx.beginPath();
-          const baseR = 60 + (i * 35);
+          const baseR = (60 + (i * 35)) * scale;
           const val = data[i*4];
           const normalized = val / 255;
-          const r = baseR + Math.pow(normalized, 1.5) * 25;
+          const r = baseR + Math.pow(normalized, 1.5) * 25 * scale;
           ctx.globalAlpha = 0.8 - (i/15);
           ctx.ellipse(cx, cy, r, r * 0.75, time * 0.5 + i * 0.3, 0, Math.PI * 2);
           ctx.stroke();
@@ -1474,22 +1698,24 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       ctx.shadowBlur = 0;
   };
 
-  const drawDigitalRain = (ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8Array, time: number, color: string) => {
+  const drawDigitalRain = (ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8Array, time: number, color: string, scale: number) => {
       const cols = 50;
       const colW = w / cols;
       ctx.fillStyle = color;
-      ctx.font = 'bold 14px monospace';
-      ctx.shadowBlur = 8;
+      const fontSize = Math.max(8, Math.round(14 * scale));
+      ctx.font = `bold ${fontSize}px monospace`;
+      ctx.shadowBlur = 8 * scale;
       ctx.shadowColor = color;
+      const charSpacing = 18 * scale;
       for(let i=0; i<cols; i++) {
           const val = data[i*2];
           const normalized = val / 255;
           const len = 8 + Math.floor(Math.pow(normalized, 1.3) * 15);
           const baseSpeed = 40 + (i % 5) * 10;
-          const speedOffset = (time * baseSpeed) % h;
+          const speedOffset = (time * baseSpeed * scale) % h;
           for(let j=0; j<len; j++) {
               const char = String.fromCharCode(0x30A0 + Math.random() * 96);
-              const y = (speedOffset + (j * 18)) % h;
+              const y = (speedOffset + (j * charSpacing)) % h;
               ctx.globalAlpha = (1 - (j/len)) * 0.8;
               ctx.fillText(char, i * colW, y);
           }
@@ -1498,9 +1724,9 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       ctx.shadowBlur = 0;
   };
 
-  const drawShockwave = (ctx: CanvasRenderingContext2D, cx: number, cy: number, bass: number, time: number, color: string) => {
+  const drawShockwave = (ctx: CanvasRenderingContext2D, cx: number, cy: number, bass: number, time: number, color: string, scale: number) => {
       const normBass = bass / 255;
-      const maxRadius = 500;
+      const maxRadius = 500 * scale;
       const rings = 6;
 
       ctx.shadowColor = color;
@@ -1508,22 +1734,22 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       for (let i = 0; i < rings; i++) {
           const phase = (time * 0.8 + (i * 0.4)) % 2;
           const progress = phase / 2;
-          const radius = 50 + progress * maxRadius;
+          const radius = (50 * scale) + progress * maxRadius;
           const alpha = (1 - progress) * (0.5 + normBass * 0.5);
-          const lineWidth = (1 - progress) * (8 + normBass * 12);
+          const lineWidth = (1 - progress) * (8 + normBass * 12) * scale;
 
           if (alpha > 0.05) {
               ctx.beginPath();
               ctx.strokeStyle = color;
               ctx.lineWidth = lineWidth;
               ctx.globalAlpha = alpha;
-              ctx.shadowBlur = 20 + normBass * 30;
+              ctx.shadowBlur = (20 + normBass * 30) * scale;
               ctx.arc(cx, cy, radius, 0, Math.PI * 2);
               ctx.stroke();
           }
       }
 
-      const coreSize = 30 + normBass * 40;
+      const coreSize = (30 + normBass * 40) * scale;
       const coreGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreSize);
       coreGrad.addColorStop(0, color);
       coreGrad.addColorStop(0.5, color);
@@ -1538,7 +1764,7 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       ctx.shadowBlur = 0;
   };
 
-  const drawParticles = (ctx: CanvasRenderingContext2D, w: number, h: number, time: number, bass: number, count: number, color: string) => {
+  const drawParticles = (ctx: CanvasRenderingContext2D, w: number, h: number, time: number, bass: number, count: number, color: string, scale: number) => {
       const normBass = bass / 255;
       const cx = w / 2;
       const cy = h / 2;
@@ -1548,16 +1774,16 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       for (let i = 0; i < risingCount; i++) {
           const seed = i * 127.1;
           const xBase = ((Math.sin(seed) * 10000) % w + w) % w;
-          const drift = Math.sin(time * 2 + seed) * 30;
+          const drift = Math.sin(time * 2 + seed) * 30 * scale;
           const x = xBase + drift;
-          const speed = 20 + (i % 7) * 15;
-          const y = h - ((time * speed + seed * 10) % (h + 100));
-          const size = 2 + (i % 4) + normBass * 3;
+          const speed = (20 + (i % 7) * 15) * scale;
+          const y = h - ((time * speed + seed * 10) % (h + 100 * scale));
+          const size = (2 + (i % 4) + normBass * 3) * scale;
           const twinkle = 0.5 + Math.sin(time * 8 + seed) * 0.3;
 
           ctx.beginPath();
           ctx.fillStyle = color;
-          ctx.shadowBlur = 15 + normBass * 10;
+          ctx.shadowBlur = (15 + normBass * 10) * scale;
           ctx.shadowColor = color;
           ctx.globalAlpha = twinkle * (0.4 + normBass * 0.4);
           ctx.arc(x, y, size, 0, Math.PI * 2);
@@ -1571,17 +1797,17 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
           const seed = i * 234.5;
           const burstPhase = (time * 1.5 + seed * 0.01) % 3;
           const burstProgress = burstPhase / 3;
-          const maxDist = 300 + normBass * 200;
+          const maxDist = (300 + normBass * 200) * scale;
           const dist = burstProgress * maxDist;
           const x = cx + Math.cos(angle) * dist;
           const y = cy + Math.sin(angle) * dist;
-          const size = (1 - burstProgress) * (3 + normBass * 4);
+          const size = (1 - burstProgress) * (3 + normBass * 4) * scale;
           const alpha = (1 - burstProgress) * (0.6 + normBass * 0.4);
 
-          if (size > 0.5 && alpha > 0.1) {
+          if (size > 0.5 * scale && alpha > 0.1) {
               ctx.beginPath();
               ctx.fillStyle = color;
-              ctx.shadowBlur = 10;
+              ctx.shadowBlur = 10 * scale;
               ctx.shadowColor = color;
               ctx.globalAlpha = alpha;
               ctx.arc(x, y, size, 0, Math.PI * 2);
@@ -1592,17 +1818,17 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       // Orbital sparkles - circle around center
       const orbitalCount = Math.floor(count * 0.15);
       for (let i = 0; i < orbitalCount; i++) {
-          const orbitRadius = 150 + (i % 4) * 80 + normBass * 50;
+          const orbitRadius = (150 + (i % 4) * 80 + normBass * 50) * scale;
           const speed = (i % 2 === 0 ? 1 : -1) * (0.8 + (i % 3) * 0.3);
           const angle = time * speed + (i / orbitalCount) * Math.PI * 2;
           const x = cx + Math.cos(angle) * orbitRadius;
           const y = cy + Math.sin(angle) * orbitRadius;
           const sparkle = 0.5 + Math.sin(time * 12 + i * 5) * 0.5;
-          const size = 2 + sparkle * 2 + normBass * 2;
+          const size = (2 + sparkle * 2 + normBass * 2) * scale;
 
           ctx.beginPath();
           ctx.fillStyle = '#fff';
-          ctx.shadowBlur = 20;
+          ctx.shadowBlur = 20 * scale;
           ctx.shadowColor = color;
           ctx.globalAlpha = sparkle * 0.8;
           ctx.arc(x, y, size, 0, Math.PI * 2);
@@ -1615,12 +1841,12 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
           const seed = i * 567.8;
           const x = ((Math.sin(seed) * 10000) % w + w) % w;
           const y = ((Math.cos(seed) * 10000) % h + h) % h;
-          const drift = Math.sin(time + seed) * 2;
-          const size = 1 + Math.sin(time * 3 + seed) * 0.5;
+          const drift = Math.sin(time + seed) * 2 * scale;
+          const size = (1 + Math.sin(time * 3 + seed) * 0.5) * scale;
 
           ctx.beginPath();
           ctx.fillStyle = '#fff';
-          ctx.shadowBlur = 5;
+          ctx.shadowBlur = 5 * scale;
           ctx.shadowColor = '#fff';
           ctx.globalAlpha = 0.2 + normBass * 0.2;
           ctx.arc(x + drift, y, size, 0, Math.PI * 2);
@@ -1631,31 +1857,32 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       ctx.shadowBlur = 0;
   };
 
-  const drawAlbumArt = (ctx: CanvasRenderingContext2D, cx: number, cy: number, pulse: number, url: string, borderColor: string, preloadedImage?: HTMLImageElement | null) => {
+  const drawAlbumArt = (ctx: CanvasRenderingContext2D, cx: number, cy: number, pulse: number, url: string, borderColor: string, scale: number, preloadedImage?: HTMLImageElement | null) => {
+    const radius = 150 * scale;
     ctx.save();
     ctx.translate(cx, cy);
     ctx.scale(pulse, pulse);
-    ctx.shadowBlur = 40;
+    ctx.shadowBlur = 40 * scale;
     ctx.shadowColor = borderColor;
     ctx.beginPath();
-    ctx.arc(0, 0, 150, 0, Math.PI * 2);
+    ctx.arc(0, 0, radius, 0, Math.PI * 2);
     ctx.closePath();
-    ctx.lineWidth = 5;
+    ctx.lineWidth = 5 * scale;
     ctx.strokeStyle = 'white';
     ctx.stroke();
     ctx.clip();
 
     // Use preloaded image if available, otherwise try to draw from URL
     if (preloadedImage && preloadedImage.complete) {
-        ctx.drawImage(preloadedImage, -150, -150, 300, 300);
+        ctx.drawImage(preloadedImage, -radius, -radius, radius * 2, radius * 2);
     } else {
         const img = new Image();
         img.src = url;
         if (img.complete) {
-            ctx.drawImage(img, -150, -150, 300, 300);
+            ctx.drawImage(img, -radius, -radius, radius * 2, radius * 2);
         } else {
             ctx.fillStyle = '#111';
-            ctx.fillRect(-150, -150, 300, 300);
+            ctx.fillRect(-radius, -radius, radius * 2, radius * 2);
         }
     }
     ctx.restore();
@@ -1706,11 +1933,18 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
             </div>
 
             {/* Canvas Preview */}
-            <div className="aspect-video w-full">
+            <div
+              className="w-full"
+              style={{
+                aspectRatio: outputConfig.aspectRatio === 'portrait' ? '9/16' :
+                             outputConfig.aspectRatio === 'square' ? '1/1' : '16/9',
+                maxHeight: outputConfig.aspectRatio === 'portrait' ? '70vh' : undefined
+              }}
+            >
               <canvas
                 ref={canvasRef}
-                width={1920}
-                height={1080}
+                width={outputConfig.useCustomResolution ? outputConfig.customWidth : outputConfig.resolution.width}
+                height={outputConfig.useCustomResolution ? outputConfig.customHeight : outputConfig.resolution.height}
                 className="w-full h-full object-contain bg-[#0a0a0a]"
               />
             </div>
@@ -1747,7 +1981,8 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
                     { id: 'presets', label: 'Presets', icon: <Grid size={14} /> },
                     { id: 'style', label: 'Style', icon: <Palette size={14} /> },
                     { id: 'text', label: 'Text', icon: <Type size={14} /> },
-                    { id: 'effects', label: 'FX', icon: <Zap size={14} /> }
+                    { id: 'effects', label: 'FX', icon: <Zap size={14} /> },
+                    { id: 'output', label: '', icon: <Settings2 size={14} /> }
                 ].map(tab => (
                     <button 
                         key={tab.id}
@@ -1894,6 +2129,44 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
                                         className="w-full accent-pink-500 h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer"
                                     />
                                 </div>
+
+                                {/* Fit Mode */}
+                                <div>
+                                    <div className="text-sm text-zinc-300 mb-2">Fit Mode</div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <button
+                                            onClick={() => setBackgroundFit('stretch')}
+                                            className={`py-2 rounded text-xs font-bold ${backgroundFit === 'stretch' ? 'bg-pink-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}
+                                        >
+                                            Stretch
+                                        </button>
+                                        <button
+                                            onClick={() => setBackgroundFit('cover')}
+                                            className={`py-2 rounded text-xs font-bold ${backgroundFit === 'cover' ? 'bg-pink-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}
+                                        >
+                                            Cover
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Position Slider (only shown in Cover mode) */}
+                                {backgroundFit === 'cover' && (
+                                    <div>
+                                        <div className="flex justify-between text-sm text-zinc-300 mb-2">
+                                            <span>Position</span>
+                                            <span>{backgroundPosition}%</span>
+                                        </div>
+                                        <input
+                                            type="range" min="0" max="100" step="1"
+                                            value={backgroundPosition}
+                                            onChange={(e) => setBackgroundPosition(parseInt(e.target.value))}
+                                            className="w-full accent-pink-500 h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer"
+                                        />
+                                        <p className="text-[10px] text-zinc-500 mt-1">
+                                            Adjusts visible area when image doesn't match aspect ratio
+                                        </p>
+                                    </div>
+                                )}
                             </div>
                         </div>
 
@@ -2129,6 +2402,241 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
                     </div>
                 )}
 
+                {/* OUTPUT TAB */}
+                {activeTab === 'output' && (
+                    <div className="space-y-6">
+                        {/* Aspect Ratio Section */}
+                        <div className="space-y-3">
+                            <label className="text-xs font-bold text-zinc-500 uppercase">
+                                Aspect Ratio
+                            </label>
+                            <div className="grid grid-cols-3 gap-2">
+                                {ASPECT_RATIOS.map(ar => (
+                                    <button
+                                        key={ar.id}
+                                        onClick={() => {
+                                            const newResolutions = RESOLUTION_PRESETS[ar.id];
+                                            const matchingRes = newResolutions.find(r => r.id === outputConfig.resolution.id) || newResolutions[4];
+                                            setOutputConfig({
+                                                ...outputConfig,
+                                                aspectRatio: ar.id,
+                                                resolution: matchingRes,
+                                            });
+                                        }}
+                                        className={`py-3 px-2 rounded-lg border text-center transition-all ${
+                                            outputConfig.aspectRatio === ar.id
+                                                ? 'bg-pink-600/20 border-pink-500 text-white'
+                                                : 'bg-black/20 border-white/5 text-zinc-400 hover:bg-white/5'
+                                        }`}
+                                    >
+                                        <div className="text-sm font-bold">{ar.label}</div>
+                                        <div className="text-[10px] text-zinc-500">
+                                            {ar.id === 'landscape' ? '16:9' : ar.id === 'portrait' ? '9:16' : '1:1'}
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Resolution Section */}
+                        <div className="space-y-3">
+                            <label className="text-xs font-bold text-zinc-500 uppercase">
+                                Resolution
+                            </label>
+                            <div className="grid grid-cols-4 gap-2">
+                                {currentResolutionOptions.map(res => (
+                                    <button
+                                        key={res.id}
+                                        onClick={() => setOutputConfig({
+                                            ...outputConfig,
+                                            resolution: res,
+                                            useCustomResolution: false
+                                        })}
+                                        className={`py-2 px-1 rounded-lg border text-center transition-all ${
+                                            !outputConfig.useCustomResolution && outputConfig.resolution.id === res.id
+                                                ? 'bg-pink-600/20 border-pink-500 text-white'
+                                                : 'bg-black/20 border-white/5 text-zinc-400 hover:bg-white/5'
+                                        }`}
+                                    >
+                                        <div className="text-xs font-bold">{res.label}</div>
+                                    </button>
+                                ))}
+                            </div>
+
+                            {/* Custom Resolution Toggle */}
+                            <div className="bg-black/20 p-3 rounded-lg border border-white/5 space-y-3">
+                                <button
+                                    onClick={() => setOutputConfig({
+                                        ...outputConfig,
+                                        useCustomResolution: !outputConfig.useCustomResolution
+                                    })}
+                                    className="w-full flex items-center justify-between"
+                                >
+                                    <span className="text-sm text-zinc-300">Custom Resolution</span>
+                                    <div className={`w-3 h-3 rounded-full ${
+                                        outputConfig.useCustomResolution
+                                            ? 'bg-pink-500 shadow-[0_0_8px_rgba(236,72,153,0.8)]'
+                                            : 'bg-zinc-700'
+                                    }`} />
+                                </button>
+
+                                {outputConfig.useCustomResolution && (
+                                    <div className="grid grid-cols-2 gap-3 animate-in fade-in slide-in-from-top-2">
+                                        <div>
+                                            <label className="text-[10px] text-zinc-500 block mb-1">Width</label>
+                                            <input
+                                                type="number"
+                                                value={outputConfig.customWidth}
+                                                onChange={(e) => setOutputConfig({
+                                                    ...outputConfig,
+                                                    customWidth: Math.max(120, Math.min(7680, parseInt(e.target.value) || 1920))
+                                                })}
+                                                step="2"
+                                                min="120"
+                                                max="7680"
+                                                className="w-full bg-zinc-800 rounded px-3 py-2 text-sm text-white border border-white/10"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] text-zinc-500 block mb-1">Height</label>
+                                            <input
+                                                type="number"
+                                                value={outputConfig.customHeight}
+                                                onChange={(e) => setOutputConfig({
+                                                    ...outputConfig,
+                                                    customHeight: Math.max(120, Math.min(4320, parseInt(e.target.value) || 1080))
+                                                })}
+                                                step="2"
+                                                min="120"
+                                                max="4320"
+                                                className="w-full bg-zinc-800 rounded px-3 py-2 text-sm text-white border border-white/10"
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Frame Rate Section */}
+                        <div className="space-y-3">
+                            <label className="text-xs font-bold text-zinc-500 uppercase">Frame Rate</label>
+                            <div className="grid grid-cols-3 gap-2">
+                                {FRAME_RATE_OPTIONS.map(opt => (
+                                    <button
+                                        key={opt.value}
+                                        onClick={() => setOutputConfig({...outputConfig, frameRate: opt.value})}
+                                        className={`py-2 px-3 rounded-lg border text-center transition-all ${
+                                            outputConfig.frameRate === opt.value
+                                                ? 'bg-pink-600/20 border-pink-500 text-white'
+                                                : 'bg-black/20 border-white/5 text-zinc-400 hover:bg-white/5'
+                                        }`}
+                                    >
+                                        <div className="text-sm font-bold">{opt.value}</div>
+                                        <div className="text-[10px] text-zinc-500">{opt.description}</div>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Encoding Quality Section */}
+                        <div className="space-y-3">
+                            <label className="text-xs font-bold text-zinc-500 uppercase">
+                                Encoding Quality
+                            </label>
+                            <div className="space-y-2">
+                                {ENCODING_PRESETS.map(enc => (
+                                    <button
+                                        key={enc.id}
+                                        onClick={() => setOutputConfig({...outputConfig, encoding: enc})}
+                                        className={`w-full p-3 rounded-lg border text-left transition-all ${
+                                            outputConfig.encoding.id === enc.id
+                                                ? 'bg-pink-600/20 border-pink-500'
+                                                : 'bg-black/20 border-white/5 hover:bg-white/5'
+                                        }`}
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <div className={`text-sm font-bold ${
+                                                    outputConfig.encoding.id === enc.id ? 'text-white' : 'text-zinc-400'
+                                                }`}>
+                                                    {enc.label}
+                                                </div>
+                                                <div className="text-[10px] text-zinc-500">{enc.description}</div>
+                                            </div>
+                                            <div className={`w-3 h-3 rounded-full ${
+                                                outputConfig.encoding.id === enc.id
+                                                    ? 'bg-pink-500 shadow-[0_0_8px_rgba(236,72,153,0.8)]'
+                                                    : 'bg-zinc-700'
+                                            }`} />
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Audio Bitrate Section */}
+                        <div className="space-y-3">
+                            <label className="text-xs font-bold text-zinc-500 uppercase">Audio Bitrate</label>
+                            <select
+                                value={outputConfig.audioBitrate}
+                                onChange={(e) => setOutputConfig({...outputConfig, audioBitrate: parseInt(e.target.value)})}
+                                className="w-full bg-zinc-800 rounded-lg px-3 py-2 text-sm text-white border border-white/10"
+                            >
+                                {AUDIO_BITRATE_OPTIONS.map(opt => (
+                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Output Summary */}
+                        <div className="bg-zinc-800/50 p-3 rounded-lg border border-white/10">
+                            <div className="text-xs text-zinc-400">
+                                <span className="font-bold text-zinc-300">Output Summary</span>
+                                <div className="mt-2 space-y-1">
+                                    <div className="flex justify-between">
+                                        <span>Aspect:</span>
+                                        <span className="text-zinc-300">
+                                            {outputConfig.aspectRatio === 'landscape' ? 'Landscape (16:9)' :
+                                             outputConfig.aspectRatio === 'portrait' ? 'Portrait (9:16)' : 'Square (1:1)'}
+                                        </span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span>Resolution:</span>
+                                        <span className="text-zinc-300">
+                                            {outputConfig.useCustomResolution
+                                                ? `${outputConfig.customWidth} x ${outputConfig.customHeight}`
+                                                : `${outputConfig.resolution.width} x ${outputConfig.resolution.height}`
+                                            }
+                                        </span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span>Frame Rate:</span>
+                                        <span className="text-zinc-300">{outputConfig.frameRate} fps</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span>Quality:</span>
+                                        <span className="text-zinc-300">{outputConfig.encoding.label}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span>Audio:</span>
+                                        <span className="text-zinc-300">{outputConfig.audioBitrate} kbps</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* High Resolution Warning */}
+                        {(outputConfig.resolution.id === '4k' || outputConfig.resolution.id === '1440p' ||
+                          (outputConfig.useCustomResolution && outputConfig.customWidth * outputConfig.customHeight > 2560 * 1440)) && (
+                            <div className="bg-amber-500/10 border border-amber-500/30 p-3 rounded-lg">
+                                <p className="text-xs text-amber-400">
+                                    <strong>Note:</strong> High resolutions require more memory and encoding time in the browser.
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                )}
+
             </div>
 
             {/* Footer */}
@@ -2178,12 +2686,16 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
 
         {/* Preview Area - Desktop only */}
         {!isMobile && (
-          <div className="flex-1 bg-black relative flex flex-col">
+          <div className="flex-1 bg-black relative flex flex-col items-center justify-center">
                <canvas
                   ref={canvasRef}
-                  width={1920}
-                  height={1080}
-                  className="w-full h-full object-contain bg-[#0a0a0a]"
+                  width={outputConfig.useCustomResolution ? outputConfig.customWidth : outputConfig.resolution.width}
+                  height={outputConfig.useCustomResolution ? outputConfig.customHeight : outputConfig.resolution.height}
+                  className="max-w-full max-h-full object-contain bg-[#0a0a0a]"
+                  style={{
+                    aspectRatio: outputConfig.aspectRatio === 'portrait' ? '9/16' :
+                                 outputConfig.aspectRatio === 'square' ? '1/1' : '16/9'
+                  }}
                />
 
                {/* Playback Controls Overlay */}
